@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1d3b53">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Tournée Joué</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<style>
+/* Mise en page : une colonne, barre d'onglets fixe en bas (usage au pouce, en extérieur) */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --fg:#14212b; --muted:#5b6b78; --line:#d7dee4;
+  --accent:#1d5f8c; --accent-fg:#ffffff; --ok:#2e7d4f; --warn:#b26a00; --bad:#b3261e;
+  --tag:#e3ecf3;
+  --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f171d; --surface:#18232b; --fg:#e6edf2; --muted:#93a4b1; --line:#2a3944;
+  --accent:#5aa9dc; --accent-fg:#0b1720; --ok:#5cc28a; --warn:#e3a645; --bad:#ef7b72;
+  --tag:#22323d; color-scheme:dark;}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 var(--f-body);
+  padding-top:env(safe-area-inset-top,0px)}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2{font-family:var(--f-display);font-weight:700;letter-spacing:.01em;margin:0}
+h2{font-size:1.35rem}
+.wrap{padding:12px max(14px,env(safe-area-inset-left,0px)) 96px max(14px,env(safe-area-inset-right,0px));max-width:720px;margin:0 auto}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+header.top h1{font-size:1.6rem}
+.count{font-family:var(--f-display);font-size:1.1rem;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px}
+.stack{display:flex;flex-direction:column;gap:10px}
+.row{display:flex;gap:8px;align-items:center}
+.row > *{min-width:0}
+label.lbl{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+input[type=text],input[type=search],textarea,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:1.05rem}
+input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#num{width:5.5rem;flex:none;text-align:center;font-weight:600}
+.btn{border:0;border-radius:8px;padding:12px 16px;font-weight:600;background:var(--tag);cursor:pointer;min-height:46px}
+.btn.primary{background:var(--accent);color:var(--accent-fg)}
+.btn.ok{background:var(--ok);color:#fff}
+.btn.big{font-size:1.15rem;padding:14px 18px;width:100%}
+.btn:disabled{opacity:.5}
+.btn.small{min-height:36px;padding:6px 10px;font-size:.9rem}
+.sugg{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 12px;font-size:.95rem;cursor:pointer}
+.chip small{color:var(--muted)}
+.list{list-style:none;margin:0;padding:0}
+.list li{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.list li:last-child{border-bottom:0}
+.list .main{flex:1;min-width:0}
+.list .main div{overflow-wrap:anywhere}
+.sub{font-size:.85rem;color:var(--muted)}
+.tag{display:inline-block;font-size:.75rem;font-weight:600;background:var(--tag);border-radius:4px;padding:1px 6px;margin-right:4px}
+.tag.warn{background:var(--warn);color:#fff}
+.tag.bad{background:var(--bad);color:#fff}
+.num{font-family:var(--f-display);font-size:1.5rem;font-weight:700;min-width:2.4ch;text-align:right;font-variant-numeric:tabular-nums}
+.x{background:none;border:0;color:var(--muted);font-size:1.3rem;padding:4px 8px;cursor:pointer}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);
+  background:var(--surface);border-top:1px solid var(--line);z-index:1000;
+  padding:0 env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+nav.tabs button{background:none;border:0;padding:12px 4px;font-family:var(--f-display);font-size:1.05rem;font-weight:600;color:var(--muted);cursor:pointer}
+nav.tabs button.on{color:var(--accent);box-shadow:inset 0 3px 0 var(--accent)}
+.status{font-size:.9rem;color:var(--muted);min-height:1.3em}
+.status.err{color:var(--bad)}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{flex:1;border:0;background:none;padding:10px;font-weight:600;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--accent-fg)}
+/* Vue livraison : carte plein écran sous la carte de l'arrêt courant */
+#view-livrer{position:fixed;inset:0;bottom:calc(50px + env(safe-area-inset-bottom,0px));top:env(safe-area-inset-top,0px);display:flex;flex-direction:column}
+#view-livrer[hidden]{display:none!important}
+#map{flex:1;min-height:200px}
+.stopcard{background:var(--surface);border-bottom:1px solid var(--line);padding:10px max(14px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:8px}
+.stopcard .addr{font-family:var(--f-display);font-size:1.45rem;font-weight:700;line-height:1.15}
+.mapbtns{position:absolute;right:12px;bottom:16px;z-index:900;display:flex;flex-direction:column;gap:8px}
+.mapbtns .btn{box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.mk{background:var(--accent);color:var(--accent-fg);border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font:700 13px var(--f-body);border:2px solid #fff}
+.mk.done{background:#8a979f}
+.mk.cur{background:var(--warn);width:36px;height:36px;font-size:15px}
+.mk.dep{background:var(--fg);color:var(--bg);border-radius:6px}
+.me{width:18px;height:18px;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 0 0 6px rgba(26,115,232,.25)}
+details summary{cursor:pointer;font-weight:600;padding:4px 0}
+.confirm{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ============ ONGLET COLIS ============ -->
+<section id="view-colis" class="wrap stack">
+  <header class="top"><h1>Colis du jour</h1><span class="count" id="cnt"></span></header>
+
+  <div class="card stack">
+    <form id="f-add" class="stack" autocomplete="off">
+      <div class="row">
+        <input id="num" type="text" inputmode="text" placeholder="N°" aria-label="Numéro">
+        <input id="street" type="search" placeholder="Rue (2-3 lettres)" aria-label="Rue">
+      </div>
+      <div class="sugg" id="sugg"></div>
+      <div class="row">
+        <button class="btn primary" style="flex:1" type="submit">Ajouter</button>
+        <button class="btn" type="button" id="b-plus" title="Même adresse que le dernier">+1 même adresse</button>
+      </div>
+      <div class="status" id="st-add"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <ul class="list" id="l-colis"></ul>
+  </div>
+
+  <details class="card">
+    <summary>Coller une liste d'adresses</summary>
+    <div class="stack" style="margin-top:8px">
+      <textarea id="bulk" rows="5" placeholder="Une adresse par ligne, ex. : 12 rue des Iris"></textarea>
+      <button class="btn" id="b-bulk" type="button">Importer</button>
+    </div>
+  </details>
+
+  <div class="card stack">
+    <button class="btn primary big" id="b-opt" type="button">Calculer la tournée</button>
+    <div class="status" id="st-opt"></div>
+  </div>
+
+  <div class="confirm" id="reset-zone">
+    <button class="btn small" id="b-reset" type="button">Vider la journée</button>
+  </div>
+</section>
+
+<!-- ============ ONGLET TRI ============ -->
+<section id="view-tri" class="wrap stack" hidden>
+  <header class="top"><h1>Tri</h1><span class="count" id="tri-sum"></span></header>
+  <div class="seg" role="tablist">
+    <button id="seg-liv" class="on" type="button">Ordre de livraison</button>
+    <button id="seg-chg" type="button">Ordre de chargement</button>
+  </div>
+  <p class="sub" id="tri-help"></p>
+  <div class="card"><ul class="list" id="l-tri"></ul></div>
+</section>
+
+<!-- ============ ONGLET LIVRER ============ -->
+<section id="view-livrer" hidden>
+  <div class="stopcard" id="stopcard"></div>
+  <div style="position:relative;flex:1;display:flex">
+    <div id="map" style="flex:1"></div>
+    <div class="mapbtns">
+      <button class="btn small" id="b-follow" type="button">Me suivre</button>
+      <button class="btn small" id="b-fit" type="button">Tout voir</button>
+      <button class="btn small" id="b-reopt" type="button">Réoptimiser</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ONGLET RÉGLAGES ============ -->
+<section id="view-reglages" class="wrap stack" hidden>
+  <header class="top"><h1>Réglages</h1></header>
+
+  <div class="card stack">
+    <h2>Dépôt</h2>
+    <input id="dep-q" type="search" placeholder="Adresse du dépôt">
+    <div class="sugg" id="dep-sugg"></div>
+    <div class="sub" id="dep-cur"></div>
+    <label class="row"><input type="checkbox" id="dep-ret"> Retour au dépôt en fin de tournée</label>
+    <label class="row"><input type="checkbox" id="dep-gps"> Partir de ma position GPS plutôt que du dépôt</label>
+  </div>
+
+  <div class="card stack">
+    <h2>Points de passage fixes</h2>
+    <p class="sub">Ajoutés automatiquement au calcul s'ils sont cochés (boîtes aux lettres, relais…).</p>
+    <ul class="list" id="l-fixes"></ul>
+    <div class="row">
+      <input id="fx-name" type="text" placeholder="Nom (ex. BAL mairie)">
+    </div>
+    <input id="fx-q" type="search" placeholder="Adresse du point">
+    <div class="sugg" id="fx-sugg"></div>
+  </div>
+
+  <div class="card stack">
+    <h2>Rues des tournées</h2>
+    <p class="sub">Une rue par ligne. Elles servent aux suggestions de saisie. Mets le nom complet (« Rue des Iris ») si l'adresse est mal trouvée.</p>
+    <div id="tournees-edit" class="stack"></div>
+    <button class="btn" id="b-save-rues" type="button">Enregistrer les rues</button>
+    <div class="status" id="st-rues"></div>
+  </div>
+</section>
+
+<nav class="tabs">
+  <button data-v="colis" class="on" type="button">Colis</button>
+  <button data-v="tri" type="button">Tri</button>
+  <button data-v="livrer" type="button">Livrer</button>
+  <button data-v="reglages" type="button">Réglages</button>
+</nav>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+/* =====================================================================
+   CONFIG
+   ===================================================================== */
+const GEO_URL  = "https://data.geopf.fr/geocodage/search";   // ex-API Adresse (BAN), opérée par l'IGN
+const OSRM_URL = "https://router.project-osrm.org";           // calcul d'itinéraire (OpenStreetMap)
+const CENTRE   = {lat:47.343, lon:0.690};                      // entre Joué-lès-Tours et Chambray, pour orienter le géocodage
+const DEPOT_DEFAUT = "1 allée de la Branchoire 37170 Chambray-lès-Tours";
+const BLOC     = 45;                                           // taille des blocs pour la matrice de temps
+
+/* Rues de départ, d'après les listes de tournées (modifiables dans Réglages) */
+const RUES_INIT = {
+  "100": ["Rue de la Mairie","Place du 11 Novembre","Hippodrome","Grandes Maisons","Iris","Tamaris","Muguet","Primevères","Campanules","Jonquilles","Rue des Petits Clos","Pervenches","Cyclamens","Berchottière","Impasse des Clématites","Rue des Millepertuis","Allée des Millepertuis","Mesliers","Impasse des Mesliers","Jasmins","Grenouillère","Rainettes","Charmes","Marnière","Érables","Ornano","Prunus","Forêt","Bad Camberg","Turone","Joué","Nière","Fusains","Plaine","Avenir","Vignes","Petites Maisons","Abricotiers","Pêchers","Groseilliers","Cerisiers","Amandiers","Pommiers","Jean de la Fontaine"],
+  "101": ["Platanes","Rue des Tilleuls","Hameau des Tilleuls","Brûlée","8 Mai","Roses","Violettes","Forêt","Buissons","Mésanges","Acacias","Frênes","Allée des Aulnes","Impasse des Aulnes","Bouleaux","Cytises","Suzanne Flon","Place Voru","Roland Pilain","Marie Laurencin","Barbara","Petites Maisons","Samuel Morse","Charles Bourseul","Avenue de la République","Boris Vian","Léonard de Vinci","Charpentier","Pinaigrier","Sicard"],
+  "107": ["Avenue de la République","Rue de la Cour","Barillerie","Laloux","Mansart","Le Nôtre","Félix Dujardin","Petite Alouette","Avenue du Général de Gaulle","Fleuriau","Rabelais","Honoré de Balzac","Boylesve","Paul-Louis Courier","Anatole France","Ronsard","Impasse Ronsard","Alfred de Vigny","Rosnay","Jules Romains","Archerie","Malarderie","Fosse Primault","Richelieu","Rue de la Branchoire","Avenue de Beaugaillard","Rue des Chardonnets","Avenue de la Branchoire","Roitelets","Horizon Vert","Fauvettes","Rossignols","Bouvreuils"]
+};
+
+/* =====================================================================
+   ÉTAT (sauvegardé dans le téléphone)
+   ===================================================================== */
+const KEY = "tournee-joue-v1";
+let S = charger() || {
+  rues: RUES_INIT,
+  depot: null,            // {label, lat, lon}
+  retour: true,
+  departGPS: false,
+  fixes: [],              // {id, nom, label, lat, lon, actif}
+  colis: [],              // {id, saisie, label, lat, lon, cle, score, tournees}
+  plan: null              // {arrets:[...], km, min, geom}
+};
+function charger(){ try{ return JSON.parse(localStorage.getItem(KEY)); }catch(e){ return null; } }
+function sauver(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+
+/* =====================================================================
+   OUTILS
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const norm = s => (s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[-']/g," ").replace(/\s+/g," ").trim();
+const uid = () => Math.random().toString(36).slice(2,10);
+const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function statut(el,msg,err){ el.textContent = msg||""; el.classList.toggle("err",!!err); }
+
+/* Index des rues : nom -> liste des tournées */
+function indexRues(){
+  const m = new Map();
+  for(const [t,liste] of Object.entries(S.rues)) for(const r of liste){
+    const k = norm(r); if(!k) continue;
+    if(!m.has(k)) m.set(k,{nom:r,tournees:[]});
+    if(!m.get(k).tournees.includes(t)) m.get(k).tournees.push(t);
+  }
+  return m;
+}
+let IDX = indexRues();
+
+/* Retrouve la ou les tournées d'une adresse géocodée */
+function tourneesDe(rueBAN){
+  const n = norm(rueBAN), res = new Set();
+  for(const [k,v] of IDX){ if(n===k || n.endsWith(" "+k) || n.includes(k) && k.length>5) v.tournees.forEach(t=>res.add(t)); }
+  return [...res].sort();
+}
+
+/* =====================================================================
+   GÉOCODAGE (Base Adresse Nationale via IGN)
+   ===================================================================== */
+async function geocode(q, opts={}){
+  const p = new URLSearchParams({q, limit: opts.limit||1, lat:CENTRE.lat, lon:CENTRE.lon});
+  if(opts.type) p.set("type",opts.type);
+  if(opts.auto) p.set("autocomplete","1");
+  const r = await fetch(GEO_URL+"?"+p);
+  if(!r.ok) throw new Error("Géocodage indisponible ("+r.status+")");
+  const j = await r.json();
+  return (j.features||[]).map(f=>({
+    label: f.properties.label, score: f.properties.score,
+    type: f.properties.type, rue: f.properties.street || f.properties.name,
+    ville: f.properties.city, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1]
+  }));
+}
+
+/* Ajoute un colis à partir d'une saisie libre */
+async function ajouterColis(saisie){
+  saisie = saisie.trim(); if(!saisie) return null;
+  let res = await geocode(saisie, {type:"housenumber"});
+  if(!res.length) res = await geocode(saisie);
+  if(!res.length) throw new Error("Adresse introuvable : "+saisie);
+  const a = res[0];
+  const c = { id:uid(), saisie, label:a.label, lat:a.lat, lon:a.lon,
+              cle: norm(a.label), score:a.score, precis: a.type==="housenumber",
+              tournees: tourneesDe(a.rue||"") };
+  S.colis.push(c); S.plan = null; sauver();
+  return c;
+}
+
+/* =====================================================================
+   SAISIE
+   ===================================================================== */
+const fNum = $("num"), fRue = $("street");
+function suggestions(){
+  const q = norm(fRue.value), box = $("sugg"); box.innerHTML = "";
+  if(q.length<2) return;
+  const out = [];
+  for(const [k,v] of IDX){ if(k.includes(q)) out.push(v); }
+  out.sort((a,b)=> norm(a.nom).indexOf(q) - norm(b.nom).indexOf(q));
+  for(const v of out.slice(0,8)){
+    const b = document.createElement("button"); b.type="button"; b.className="chip";
+    b.innerHTML = esc(v.nom)+" <small>"+v.tournees.join("/")+"</small>";
+    b.onclick = ()=>{ fRue.value = v.nom; box.innerHTML=""; envoyer(); };
+    box.appendChild(b);
+  }
+}
+fRue.addEventListener("input", suggestions);
+
+async function envoyer(){
+  const n = fNum.value.trim(), r = fRue.value.trim();
+  if(!r){ fRue.focus(); return; }
+  const st = $("st-add"); statut(st,"Recherche…");
+  try{
+    const c = await ajouterColis((n?n+" ":"")+r);
+    statut(st, "✓ "+c.label + (c.precis?"":" (numéro non trouvé, vérifie)"), !c.precis);
+    fNum.value=""; $("sugg").innerHTML=""; fNum.focus();   // on garde la rue : souvent plusieurs colis dans la même
+    rendreColis();
+  }catch(e){ statut(st,e.message,true); }
+}
+$("f-add").addEventListener("submit", e=>{ e.preventDefault(); envoyer(); });
+fNum.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); fRue.value? envoyer() : fRue.focus(); }});
+
+/* +1 : duplique le dernier colis (même adresse) */
+$("b-plus").onclick = ()=>{
+  const d = S.colis[S.colis.length-1]; if(!d) return;
+  S.colis.push({...d, id:uid()}); S.plan=null; sauver(); rendreColis();
+  statut($("st-add"),"✓ +1 au "+d.label);
+};
+
+/* Import en masse */
+$("b-bulk").onclick = async ()=>{
+  const lignes = $("bulk").value.split("\n").map(s=>s.trim()).filter(Boolean);
+  const st = $("st-add"); let ko = [];
+  for(let i=0;i<lignes.length;i++){
+    statut(st,`Import ${i+1}/${lignes.length}…`);
+    try{ await ajouterColis(lignes[i]); }catch(e){ ko.push(lignes[i]); }
+  }
+  $("bulk").value = ko.join("\n");
+  statut(st, ko.length? ko.length+" adresse(s) non trouvée(s), restées dans la zone d'import." : "Import terminé.", ko.length>0);
+  rendreColis();
+};
+
+function rendreColis(){
+  const ul = $("l-colis"); ul.innerHTML="";
+  $("cnt").textContent = S.colis.length+" colis · "+grouper().length+" arrêts";
+  if(!S.colis.length){ ul.innerHTML = '<li class="sub">Aucun colis. Tape un numéro puis 2-3 lettres de la rue.</li>'; return; }
+  [...S.colis].reverse().forEach(c=>{
+    const li = document.createElement("li");
+    const tags = (c.tournees.length? c.tournees.map(t=>`<span class="tag">${t}</span>`).join("") : '<span class="tag">hors liste</span>')
+               + (c.precis? "" : '<span class="tag warn">à vérifier</span>');
+    li.innerHTML = `<div class="main"><div>${esc(c.label)}</div><div class="sub">${tags}saisi : ${esc(c.saisie)}</div></div>`;
+    const x = document.createElement("button"); x.className="x"; x.type="button"; x.textContent="✕"; x.setAttribute("aria-label","Supprimer");
+    x.onclick = ()=>{ S.colis = S.colis.filter(k=>k.id!==c.id); S.plan=null; sauver(); rendreColis(); };
+    li.appendChild(x); ul.appendChild(li);
+  });
+}
+
+/* Vider la journée (confirmation dans la page) */
+function boutonVider(){
+  const z = $("reset-zone");
+  z.innerHTML = '<button class="btn small" id="b-reset" type="button">Vider la journée</button>';
+  $("b-reset").onclick = ()=>{
+    z.innerHTML = '<span>Supprimer tous les colis du jour ?</span><button class="btn small" id="r-ok" type="button" style="background:var(--bad);color:#fff">Oui, vider</button><button class="btn small" id="r-no" type="button">Annuler</button>';
+    $("r-ok").onclick = ()=>{ S.colis=[]; S.plan=null; sauver(); boutonVider(); rendreColis(); statut($("st-opt"),""); };
+    $("r-no").onclick = boutonVider;
+  };
+}
+boutonVider();
+
+/* =====================================================================
+   REGROUPEMENT EN ARRÊTS
+   ===================================================================== */
+function grouper(){
+  const m = new Map();
+  for(const c of S.colis){
+    if(!m.has(c.cle)) m.set(c.cle,{type:"colis", label:c.label, lat:c.lat, lon:c.lon, n:0, tournees:c.tournees, precis:c.precis});
+    m.get(c.cle).n++;
+  }
+  const arrets = [...m.values()];
+  for(const f of S.fixes) if(f.actif && f.lat) arrets.push({type:"fixe", label:f.nom+" · "+f.label, lat:f.lat, lon:f.lon, n:0, tournees:[], precis:true});
+  return arrets;
+}
+
+/* =====================================================================
+   MATRICE DE TEMPS (OSRM, par blocs) + secours à vol d'oiseau
+   ===================================================================== */
+function vol(a,b){ // distance en mètres
+  const R=6371000, t=Math.PI/180, dl=(b.lat-a.lat)*t, dg=(b.lon-a.lon)*t;
+  const h = Math.sin(dl/2)**2 + Math.cos(a.lat*t)*Math.cos(b.lat*t)*Math.sin(dg/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+async function matrice(pts, onProg){
+  const n = pts.length, D = Array.from({length:n},()=>new Array(n).fill(0));
+  const blocs = []; for(let i=0;i<n;i+=BLOC) blocs.push([...Array(Math.min(BLOC,n-i)).keys()].map(k=>k+i));
+  let fait=0, total=blocs.length**2, secours=false;
+  for(const A of blocs) for(const B of blocs){
+    const memes = A===B, idx = memes? A : A.concat(B);
+    const coords = idx.map(i=>pts[i].lon.toFixed(6)+","+pts[i].lat.toFixed(6)).join(";");
+    const src = A.map((_,k)=>k).join(";"), dst = memes? src : B.map((_,k)=>k+A.length).join(";");
+    try{
+      const r = await fetch(`${OSRM_URL}/table/v1/driving/${coords}?sources=${src}&destinations=${dst}&annotations=duration`);
+      const j = await r.json(); if(j.code!=="Ok") throw 0;
+      A.forEach((i,a)=>B.forEach((k,b)=>{ D[i][k] = j.durations[a][b] ?? vol(pts[i],pts[k])/7; }));
+    }catch(e){
+      secours = true;   // estimation : 25 km/h, détour ×1,35
+      A.forEach(i=>B.forEach(k=>{ D[i][k] = vol(pts[i],pts[k])*1.35/7; }));
+    }
+    onProg && onProg(++fait,total);
+  }
+  return {D, secours};
+}
+
+/* =====================================================================
+   OPTIMISATION (voyageur de commerce, départ fixe, retour optionnel)
+   plus proche voisin, puis améliorations 2-opt et Or-opt
+   ===================================================================== */
+function optimiser(D, depart, retour, budgetMs=4000){
+  const n = D.length, reste = [...Array(n).keys()].filter(i=>i!==depart);
+  // 1) plus proche voisin
+  let tour=[], cur=depart, libres=new Set(reste);
+  while(libres.size){ let best=null,bd=Infinity; for(const k of libres){ if(D[cur][k]<bd){bd=D[cur][k];best=k;} } tour.push(best); libres.delete(best); cur=best; }
+  const cout = t => { let c=D[depart][t[0]]||0; for(let i=1;i<t.length;i++) c+=D[t[i-1]][t[i]]; if(retour&&t.length) c+=D[t[t.length-1]][depart]; return c; };
+  let best = cout(tour); const t0 = performance.now();
+  let mieux = true;
+  while(mieux && performance.now()-t0 < budgetMs){
+    mieux = false;
+    // 2-opt : inverser un segment
+    for(let i=0;i<tour.length-1 && !mieux;i++) for(let j=i+1;j<tour.length;j++){
+      const t = tour.slice(0,i).concat(tour.slice(i,j+1).reverse(), tour.slice(j+1));
+      const c = cout(t); if(c < best-0.5){ tour=t; best=c; mieux=true; break; }
+    }
+    // Or-opt : déplacer un bloc de 1 à 3 arrêts
+    for(let L=1;L<=3 && !mieux;L++) for(let i=0;i+L<=tour.length && !mieux;i++){
+      const seg = tour.slice(i,i+L), sans = tour.slice(0,i).concat(tour.slice(i+L));
+      for(let p=0;p<=sans.length;p++){ if(p===i) continue;
+        const t = sans.slice(0,p).concat(seg, sans.slice(p)); const c = cout(t);
+        if(c < best-0.5){ tour=t; best=c; mieux=true; break; }
+      }
+    }
+  }
+  return {tour, cout:best};
+}
+
+/* =====================================================================
+   TRACÉ DE L'ITINÉRAIRE (OSRM route, par morceaux)
+   ===================================================================== */
+async function trace(pts){
+  const geom=[], legs=[]; const MAX=80;
+  for(let s=0; s<pts.length-1; s+=MAX-1){
+    const part = pts.slice(s, s+MAX);
+    const coords = part.map(p=>p.lon.toFixed(6)+","+p.lat.toFixed(6)).join(";");
+    try{
+      const r = await fetch(`${OSRM_URL}/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+      const j = await r.json(); if(j.code!=="Ok") throw 0;
+      j.routes[0].geometry.coordinates.forEach(c=>geom.push([c[1],c[0]]));
+      j.routes[0].legs.forEach(l=>legs.push({m:l.distance, s:l.duration}));
+    }catch(e){
+      part.forEach(p=>geom.push([p.lat,p.lon]));
+      for(let i=1;i<part.length;i++){ const m=vol(part[i-1],part[i])*1.35; legs.push({m,s:m/7}); }
+    }
+  }
+  return {geom, legs};
+}
+
+/* Position GPS ponctuelle */
+function maPosition(){
+  return new Promise((ok,ko)=>{
+    if(!navigator.geolocation) return ko(new Error("GPS indisponible"));
+    navigator.geolocation.getCurrentPosition(p=>ok({lat:p.coords.latitude, lon:p.coords.longitude}), ()=>ko(new Error("Position refusée ou introuvable")), {enableHighAccuracy:true, timeout:15000});
+  });
+}
+
+/* =====================================================================
+   CALCUL COMPLET
+   ===================================================================== */
+async function calculer(depuisGPS, arretsSource){
+  const st = $("st-opt"), btn = $("b-opt");
+  const arrets = arretsSource || grouper();
+  if(!arrets.length){ statut(st,"Ajoute des colis d'abord.",true); return; }
+  let dep;
+  if(depuisGPS || S.departGPS){ try{ statut(st,"Localisation…"); const p = await maPosition(); dep = {type:"depot",label:"Ma position",...p}; }catch(e){ statut(st,e.message,true); return; } }
+  else if(S.depot){ dep = {type:"depot", ...S.depot}; }
+  else { statut(st,"Renseigne l'adresse du dépôt dans Réglages.",true); return; }
+  btn.disabled = true;
+  try{
+    const pts = [dep, ...arrets];
+    const {D, secours} = await matrice(pts,(a,b)=>statut(st,`Temps de trajet… ${a}/${b}`));
+    statut(st,"Optimisation…");
+    await new Promise(r=>setTimeout(r,20));
+    const retour = S.retour && !depuisGPS;
+    const {tour} = optimiser(D, 0, retour);
+    const ordre = tour.map(i=>pts[i]);
+    statut(st,"Tracé…");
+    const chemin = [dep, ...ordre, ...(retour?[dep]:[])];
+    const {geom, legs} = await trace(chemin);
+    const km = legs.reduce((a,l)=>a+l.m,0)/1000, min = legs.reduce((a,l)=>a+l.s,0)/60;
+    S.plan = { depart:dep, retour, arrets: ordre.map((a,i)=>({...a, rang:i+1, fait:false, leg:legs[i]})), geom, km, min, secours };
+    sauver();
+    statut(st, `${ordre.length} arrêts · ${km.toFixed(1)} km · ${Math.round(min)} min de route`+(secours?" (estimation, service d'itinéraire injoignable)":""));
+    rendreTri();
+    return true;
+  }catch(e){ statut(st,"Erreur : "+e.message,true); }
+  finally{ btn.disabled=false; }
+}
+$("b-opt").onclick = async ()=>{ if(await calculer(false)) montrer("tri"); };
+
+/* =====================================================================
+   ONGLET TRI
+   ===================================================================== */
+let modeTri = "liv";
+$("seg-liv").onclick = ()=>{ modeTri="liv"; rendreTri(); };
+$("seg-chg").onclick = ()=>{ modeTri="chg"; rendreTri(); };
+function rendreTri(){
+  $("seg-liv").classList.toggle("on",modeTri==="liv"); $("seg-chg").classList.toggle("on",modeTri==="chg");
+  const ul = $("l-tri"); ul.innerHTML="";
+  if(!S.plan){ $("tri-sum").textContent=""; $("tri-help").textContent=""; ul.innerHTML='<li class="sub">Calcule la tournée dans l\'onglet Colis.</li>'; return; }
+  const a = S.plan.arrets.filter(x=>x.type==="colis");
+  $("tri-sum").textContent = a.reduce((s,x)=>s+x.n,0)+" colis";
+  $("tri-help").textContent = modeTri==="liv"
+    ? "Écris le numéro au marqueur sur chaque colis."
+    : "Charge dans cet ordre : le premier va au fond, le dernier à portée de main.";
+  const liste = modeTri==="liv"? S.plan.arrets : [...S.plan.arrets].reverse();
+  for(const x of liste){
+    const li = document.createElement("li");
+    const tags = x.type==="fixe" ? '<span class="tag">point fixe</span>'
+      : (x.tournees.length? x.tournees.map(t=>`<span class="tag">${t}</span>`).join("") : '<span class="tag">hors liste</span>') + (x.n>1?`<span class="tag">${x.n} colis</span>`:"");
+    li.innerHTML = `<span class="num">${x.rang}</span><div class="main"><div>${esc(x.label)}</div><div class="sub">${tags}</div></div>`;
+    ul.appendChild(li);
+  }
+}
+
+/* =====================================================================
+   ONGLET LIVRER (carte)
+   ===================================================================== */
+let map, coucheRoute, coucheMk, mkMoi, suivre=false, watchId=null;
+function initCarte(){
+  if(map) return;
+  map = L.map("map",{zoomControl:false}).setView([CENTRE.lat,CENTRE.lon],14);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+  coucheRoute = L.layerGroup().addTo(map); coucheMk = L.layerGroup().addTo(map);
+  if(navigator.geolocation){
+    watchId = navigator.geolocation.watchPosition(p=>{
+      const ll=[p.coords.latitude,p.coords.longitude];
+      if(!mkMoi) mkMoi = L.marker(ll,{icon:L.divIcon({className:"",html:'<div class="me"></div>',iconSize:[18,18]}),zIndexOffset:1000}).addTo(map);
+      else mkMoi.setLatLng(ll);
+      if(suivre) map.setView(ll, Math.max(map.getZoom(),17));
+    },()=>{}, {enableHighAccuracy:true, maximumAge:5000});
+  }
+}
+function courant(){ return S.plan ? S.plan.arrets.find(a=>!a.fait) : null; }
+function rendreLivrer(){
+  initCarte(); setTimeout(()=>map.invalidateSize(),50);
+  const card = $("stopcard");
+  coucheRoute.clearLayers(); coucheMk.clearLayers();
+  if(!S.plan){ card.innerHTML='<div class="sub">Aucune tournée calculée.</div>'; return; }
+  const c = courant(), faits = S.plan.arrets.filter(a=>a.fait).length, tot = S.plan.arrets.length;
+  if(c){
+    const suiv = S.plan.arrets.filter(a=>!a.fait)[1];
+    card.innerHTML = `<div class="sub">Arrêt ${c.rang} / ${tot} · ${faits} faits</div>
+      <div class="addr">${esc(c.label)}</div>
+      <div class="sub">${c.type==="fixe"?"Point fixe":c.n+" colis"}${suiv?" · ensuite : "+esc(suiv.label):""}</div>
+      <div class="grid2"><button class="btn ok big" id="b-ok" type="button">Livré</button><button class="btn big" id="b-skip" type="button">Passer</button></div>`;
+    $("b-ok").onclick = ()=>{ c.fait=true; sauver(); rendreLivrer(); };
+    $("b-skip").onclick = ()=>{ const i=S.plan.arrets.indexOf(c); S.plan.arrets.splice(i,1); S.plan.arrets.push(c); S.plan.arrets.forEach((a,k)=>a.rang=k+1); sauver(); rendreLivrer(); };
+  } else {
+    card.innerHTML = `<div class="addr">Tournée terminée</div><div class="sub">${tot} arrêts livrés.</div>`;
+  }
+  L.polyline(S.plan.geom,{color:getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()||"#1d5f8c",weight:5,opacity:.75}).addTo(coucheRoute);
+  const d = S.plan.depart;
+  L.marker([d.lat,d.lon],{icon:L.divIcon({className:"",html:'<div class="mk dep">D</div>',iconSize:[28,28]})}).addTo(coucheMk);
+  for(const a of S.plan.arrets){
+    const cls = a.fait?"done":(a===c?"cur":"");
+    const sz = a===c?36:28;
+    L.marker([a.lat,a.lon],{icon:L.divIcon({className:"",html:`<div class="mk ${cls}">${a.rang}</div>`,iconSize:[sz,sz]}),zIndexOffset:a===c?500:0})
+      .bindPopup(esc(a.label)+(a.n>1?"<br>"+a.n+" colis":"")).addTo(coucheMk);
+  }
+  if(c && !suivre) map.setView([c.lat,c.lon], Math.max(map.getZoom(),16));
+}
+$("b-follow").onclick = ()=>{ suivre=!suivre; $("b-follow").classList.toggle("primary",suivre); if(suivre&&mkMoi) map.setView(mkMoi.getLatLng(),17); };
+$("b-fit").onclick = ()=>{ if(S.plan) map.fitBounds(L.latLngBounds(S.plan.geom),{padding:[20,20]}); };
+$("b-reopt").onclick = async ()=>{
+  if(!S.plan) return;
+  const restants = S.plan.arrets.filter(a=>!a.fait), faits = S.plan.arrets.filter(a=>a.fait);
+  if(!restants.length) return;
+  $("b-reopt").textContent="Calcul…";
+  const ok = await calculer(true, restants.map(({rang,fait,leg,...a})=>a));
+  if(ok){ S.plan.arrets = faits.concat(S.plan.arrets); S.plan.arrets.forEach((a,k)=>a.rang=k+1); sauver(); rendreTri(); }
+  $("b-reopt").textContent="Réoptimiser"; rendreLivrer();
+};
+
+/* =====================================================================
+   RÉGLAGES
+   ===================================================================== */
+function champAdresse(input, box, choisir){
+  let t;
+  input.addEventListener("input",()=>{
+    clearTimeout(t); const q=input.value.trim(); box.innerHTML="";
+    if(q.length<4) return;
+    t = setTimeout(async ()=>{
+      try{
+        const res = await geocode(q,{limit:5, auto:true});
+        box.innerHTML="";
+        res.forEach(a=>{ const b=document.createElement("button"); b.type="button"; b.className="chip"; b.textContent=a.label;
+          b.onclick=()=>{ box.innerHTML=""; input.value=""; choisir(a); }; box.appendChild(b); });
+      }catch(e){ box.textContent=e.message; }
+    },300);
+  });
+}
+champAdresse($("dep-q"),$("dep-sugg"),a=>{ S.depot={label:a.label,lat:a.lat,lon:a.lon}; S.plan=null; sauver(); rendreReglages(); });
+champAdresse($("fx-q"),$("fx-sugg"),a=>{
+  const nom = $("fx-name").value.trim() || "Point fixe";
+  S.fixes.push({id:uid(), nom, label:a.label, lat:a.lat, lon:a.lon, actif:true});
+  $("fx-name").value=""; S.plan=null; sauver(); rendreReglages();
+});
+$("dep-ret").onchange = e=>{ S.retour=e.target.checked; S.plan=null; sauver(); };
+$("dep-gps").onchange = e=>{ S.departGPS=e.target.checked; S.plan=null; sauver(); };
+$("b-save-rues").onclick = ()=>{
+  document.querySelectorAll("[data-tournee]").forEach(ta=>{ S.rues[ta.dataset.tournee] = ta.value.split("\n").map(s=>s.trim()).filter(Boolean); });
+  IDX = indexRues(); S.colis.forEach(c=>{ c.tournees = tourneesDe(c.label.replace(/^\S+\s/,"").split(/\s\d{5}/)[0]); });
+  sauver(); statut($("st-rues"),"Rues enregistrées.");
+};
+function rendreReglages(){
+  $("dep-cur").textContent = S.depot ? "Dépôt : "+S.depot.label : "Aucun dépôt renseigné.";
+  $("dep-ret").checked = S.retour; $("dep-gps").checked = S.departGPS;
+  const ul = $("l-fixes"); ul.innerHTML="";
+  if(!S.fixes.length) ul.innerHTML='<li class="sub">Aucun point fixe.</li>';
+  S.fixes.forEach(f=>{
+    const li=document.createElement("li");
+    li.innerHTML=`<input type="checkbox" ${f.actif?"checked":""} aria-label="Actif"><div class="main"><div>${esc(f.nom)}</div><div class="sub">${esc(f.label)}</div></div>`;
+    li.querySelector("input").onchange=e=>{ f.actif=e.target.checked; S.plan=null; sauver(); };
+    const x=document.createElement("button"); x.className="x"; x.type="button"; x.textContent="✕";
+    x.onclick=()=>{ S.fixes=S.fixes.filter(k=>k.id!==f.id); S.plan=null; sauver(); rendreReglages(); };
+    li.appendChild(x); ul.appendChild(li);
+  });
+  const box = $("tournees-edit"); box.innerHTML="";
+  for(const [t,liste] of Object.entries(S.rues)){
+    const d=document.createElement("details");
+    d.innerHTML=`<summary>Tournée ${esc(t)} · ${liste.length} rues</summary><textarea rows="10" data-tournee="${esc(t)}">${esc(liste.join("\n"))}</textarea>`;
+    box.appendChild(d);
+  }
+}
+
+/* =====================================================================
+   NAVIGATION
+   ===================================================================== */
+function montrer(v){
+  ["colis","tri","livrer","reglages"].forEach(k=>$("view-"+k).hidden = k!==v);
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+  if(v==="colis") rendreColis();
+  if(v==="tri") rendreTri();
+  if(v==="livrer") rendreLivrer();
+  if(v==="reglages") rendreReglages();
+  window.scrollTo(0,0);
+}
+document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>montrer(b.dataset.v));
+
+/* Garde l'écran allumé pendant la livraison si le téléphone le permet */
+async function ecranAllume(){ try{ if("wakeLock" in navigator) await navigator.wakeLock.request("screen"); }catch(e){} }
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") ecranAllume(); });
+ecranAllume();
+
+/* Premier lancement : dépôt pré-rempli (La Poste Chambray) */
+(async ()=>{
+  if(!S.depot){
+    try{ const a=(await geocode(DEPOT_DEFAUT,{type:"housenumber"}))[0]; if(a){ S.depot={label:a.label,lat:a.lat,lon:a.lon}; sauver(); } }catch(e){}
+  }
+  montrer(S.depot ? "colis" : "reglages");
+})();
+</script>
+</body>
+</html>
