@@ -24,6 +24,7 @@
   --accent:#5aa9dc; --accent-fg:#0b1720; --ok:#5cc28a; --warn:#e3a645; --bad:#ef7b72;
   --tag:#22323d; color-scheme:dark;}}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 var(--f-body);
   padding-top:env(safe-area-inset-top,0px)}
@@ -62,10 +63,12 @@ input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid v
 .tag.bad{background:var(--bad);color:#fff}
 .num{font-family:var(--f-display);font-size:1.5rem;font-weight:700;min-width:2.4ch;text-align:right;font-variant-numeric:tabular-nums}
 .x{background:none;border:0;color:var(--muted);font-size:1.3rem;padding:4px 8px;cursor:pointer}
-nav.tabs{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);
+nav.tabs{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(5,1fr);
   background:var(--surface);border-top:1px solid var(--line);z-index:1000;
   padding:0 env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
-nav.tabs button{background:none;border:0;padding:12px 4px;font-family:var(--f-display);font-size:1.05rem;font-weight:600;color:var(--muted);cursor:pointer}
+nav.tabs button{background:none;border:0;padding:12px 4px;font-family:var(--f-display);font-size:1rem;font-weight:600;color:var(--muted);cursor:pointer}
+.jour{display:flex;justify-content:space-between;gap:8px;align-items:baseline;width:100%}
+.banner{background:var(--tag);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px}
 nav.tabs button.on{color:var(--accent);box-shadow:inset 0 3px 0 var(--accent)}
 .status{font-size:.9rem;color:var(--muted);min-height:1.3em}
 .status.err{color:var(--bad)}
@@ -158,9 +161,19 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
   </div>
 </section>
 
+<!-- ============ ONGLET HISTORIQUE ============ -->
+<section id="view-histo" class="wrap stack" hidden>
+  <header class="top"><h1>Historique</h1><span class="count" id="h-sum"></span></header>
+  <input id="h-q" type="search" placeholder="Chercher une adresse dans l'historique">
+  <div class="card" id="h-res" hidden></div>
+  <div class="stack" id="h-jours"></div>
+  <button class="btn" id="h-csv" type="button">Exporter en CSV</button>
+  <p class="sub">L'historique est gardé sur ce téléphone (150 derniers jours).</p>
+</section>
+
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.3</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.4</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -195,6 +208,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
   <button data-v="colis" class="on" type="button">Colis</button>
   <button data-v="tri" type="button">Tri</button>
   <button data-v="livrer" type="button">Livrer</button>
+  <button data-v="histo" type="button">Historique</button>
   <button data-v="reglages" type="button">Réglages</button>
 </nav>
 
@@ -232,7 +246,24 @@ let S = charger() || {
   plan: null              // {arrets:[...], km, min, geom}
 };
 function charger(){ try{ return JSON.parse(localStorage.getItem(KEY)); }catch(e){ return null; } }
-function sauver(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+S.historique = S.historique || {};   // {"2026-11-05": {colis, km, min, arrets:[{r,l,n,f,t}]}}
+const aujourdhui = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+
+/* Photo de la journée en cours, mise à jour à chaque enregistrement */
+function photoDuJour(){
+  if(!S.colis.length){ S.jour = null; return; }
+  if(!S.jour) S.jour = aujourdhui();
+  const arrets = S.plan ? S.plan.arrets : grouper();
+  S.historique[S.jour] = {
+    colis: S.colis.length,
+    km: S.plan ? +S.plan.km.toFixed(1) : null,
+    min: S.plan ? Math.round(S.plan.min) : null,
+    arrets: arrets.map(a=>({r:a.rang??null, l:a.label, n:a.n, f:!!a.fait, t:a.t||null, x:a.type==="fixe"}))
+  };
+  const jours = Object.keys(S.historique).sort();
+  while(jours.length>150) delete S.historique[jours.shift()];
+}
+function sauver(){ photoDuJour(); try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
 
 /* =====================================================================
    OUTILS
@@ -369,6 +400,12 @@ $("b-bulk").onclick = async ()=>{
 function rendreColis(){
   const ul = $("l-colis"); ul.innerHTML="";
   $("cnt").textContent = S.colis.length+" colis · "+grouper().length+" arrêts";
+  if(S.jour && S.jour!==aujourdhui() && S.colis.length){
+    const li=document.createElement("li");
+    li.innerHTML=`<div class="banner main"><div>Ces colis datent du ${dateFr(S.jour)}. Ils sont déjà dans l'historique.</div><button class="btn primary" type="button" id="b-new">Commencer la journée</button></div>`;
+    ul.appendChild(li);
+    li.querySelector("#b-new").onclick=()=>{ S.colis=[]; S.plan=null; sauver(); rendreColis(); statut($("st-opt"),""); };
+  }
   if(!S.colis.length){ ul.innerHTML = '<li class="sub">Aucun colis. Tape un numéro puis 2-3 lettres de la rue.</li>'; return; }
   [...S.colis].reverse().forEach(c=>{
     const li = document.createElement("li");
@@ -658,7 +695,7 @@ function rendreLivrer(){
         <button class="btn small" id="b-add" type="button">+ Colis</button>
       </div>
       <div id="panel" hidden style="max-height:42vh;overflow:auto"></div>`;
-    $("b-ok").onclick = ()=>{ c.fait=true; sauver(); rendreLivrer(); };
+    $("b-ok").onclick = ()=>{ c.fait=true; c.t=Date.now(); sauver(); rendreLivrer(); };
     $("b-skip").onclick = ()=>{ const i=S.plan.arrets.indexOf(c); S.plan.arrets.splice(i,1); S.plan.arrets.push(c); sauver(); rendreLivrer(); };
     $("b-next").onclick = listeProchains;
     $("b-edit").onclick = ()=>{ $("panel").dataset.mode="form"; formAdresse("Corriger : "+c.label, async a=>{
@@ -779,13 +816,58 @@ function rendreReglages(){
 /* =====================================================================
    NAVIGATION
    ===================================================================== */
+/* =====================================================================
+   HISTORIQUE
+   ===================================================================== */
+function dateFr(j){ const [a,m,d]=j.split("-"); return new Date(a,m-1,d).toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"}); }
+const heure = t => t ? new Date(t).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}) : "";
+const court = l => (l||"").replace(/\s\d{5}\s.*$/,"");
+function rendreHisto(){
+  const jours = Object.keys(S.historique).sort().reverse();
+  $("h-sum").textContent = jours.length+" jour"+(jours.length>1?"s":"");
+  const box=$("h-jours"); box.innerHTML="";
+  if(!jours.length){ box.innerHTML='<div class="card sub">Rien encore. Chaque journée saisie s\'enregistre ici automatiquement.</div>'; return; }
+  for(const j of jours){
+    const d=S.historique[j], col=d.arrets.filter(a=>!a.x), livres=col.filter(a=>a.f).length;
+    const ts=d.arrets.map(a=>a.t).filter(Boolean), deb=ts.length?Math.min(...ts):null, fin=ts.length?Math.max(...ts):null;
+    const el=document.createElement("details"); el.className="card";
+    el.innerHTML=`<summary><span class="jour"><span>${dateFr(j)}</span><span class="sub">${d.colis} colis · ${col.length} arrêts${d.km?" · "+d.km+" km":""}</span></span></summary>
+      <div class="sub" style="margin:6px 0">${livres}/${col.length} arrêts livrés${deb?" · de "+heure(deb)+" à "+heure(fin):""}</div>
+      <ul class="list">${d.arrets.map(a=>`<li><span class="num">${a.r??""}</span><div class="main"><div>${esc(court(a.l))}</div><div class="sub">${a.x?"point fixe":a.n+" colis"}${a.f?" · livré "+heure(a.t):""}</div></div></li>`).join("")}</ul>`;
+    box.appendChild(el);
+  }
+}
+$("h-q").addEventListener("input",()=>{
+  const q=norm($("h-q").value), box=$("h-res");
+  if(q.length<2){ box.hidden=true; return; }
+  const m=new Map();
+  for(const [j,d] of Object.entries(S.historique)) for(const a of d.arrets){
+    if(a.x || !norm(a.l).includes(q)) continue;
+    const k=a.l; if(!m.has(k)) m.set(k,{l:k,fois:0,colis:0,der:j});
+    const e=m.get(k); e.fois++; e.colis+=a.n; if(j>e.der) e.der=j;
+  }
+  const res=[...m.values()].sort((a,b)=>b.fois-a.fois).slice(0,30);
+  box.hidden=false;
+  box.innerHTML = res.length ? `<ul class="list">${res.map(e=>`<li><div class="main"><div>${esc(court(e.l))}</div><div class="sub">${e.fois} jour${e.fois>1?"s":""} · ${e.colis} colis · dernier : ${dateFr(e.der)}</div></div></li>`).join("")}</ul>` : '<div class="sub">Aucune adresse trouvée.</div>';
+});
+$("h-csv").onclick=()=>{
+  const lignes=[["date","numero_tri","adresse","colis","livre","heure_livraison","point_fixe"]];
+  for(const j of Object.keys(S.historique).sort()) for(const a of S.historique[j].arrets)
+    lignes.push([j,a.r??"",a.l,a.n,a.f?"oui":"non",heure(a.t),a.x?"oui":"non"]);
+  const csv="\ufeff"+lignes.map(l=>l.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(";")).join("\n");
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  const a=document.createElement("a"); a.href=url; a.download="historique-tournees.csv"; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+};
+
 function montrer(v){
-  ["colis","tri","livrer","reglages"].forEach(k=>$("view-"+k).hidden = k!==v);
+  ["colis","tri","livrer","histo","reglages"].forEach(k=>$("view-"+k).hidden = k!==v);
   document.querySelectorAll("nav.tabs button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
   if(v==="colis") rendreColis();
   if(v==="tri") rendreTri();
   if(v==="livrer") rendreLivrer();
   if(v==="reglages") rendreReglages();
+  if(v==="histo") rendreHisto();
   window.scrollTo(0,0);
 }
 document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>montrer(b.dataset.v));
