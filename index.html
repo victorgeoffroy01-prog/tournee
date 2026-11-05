@@ -164,7 +164,11 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 <!-- ============ ONGLET HISTORIQUE ============ -->
 <section id="view-histo" class="wrap stack" hidden>
   <header class="top"><h1>Historique</h1><span class="count" id="h-sum"></span></header>
-  <input id="h-q" type="search" placeholder="Chercher une adresse dans l'historique">
+  <div class="row">
+    <input id="h-date" type="date" aria-label="Jour" style="flex:1">
+    <button class="btn" id="h-tous" type="button">Tous les jours</button>
+  </div>
+  <input id="h-q" type="search" placeholder="Chercher une adresse">
   <div class="card" id="h-res" hidden></div>
   <div class="stack" id="h-jours"></div>
   <button class="btn" id="h-csv" type="button">Exporter en CSV</button>
@@ -173,7 +177,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.4</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.5</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -823,23 +827,33 @@ function dateFr(j){ const [a,m,d]=j.split("-"); return new Date(a,m-1,d).toLocal
 const heure = t => t ? new Date(t).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}) : "";
 const court = l => (l||"").replace(/\s\d{5}\s.*$/,"");
 function rendreHisto(){
-  const jours = Object.keys(S.historique).sort().reverse();
-  $("h-sum").textContent = jours.length+" jour"+(jours.length>1?"s":"");
+  const tous = Object.keys(S.historique).sort().reverse(), choix = $("h-date").value;
+  const jours = choix ? tous.filter(j=>j===choix) : tous;
+  $("h-sum").textContent = tous.length+" jour"+(tous.length>1?"s":"");
+  $("h-tous").hidden = !choix;
   const box=$("h-jours"); box.innerHTML="";
-  if(!jours.length){ box.innerHTML='<div class="card sub">Rien encore. Chaque journée saisie s\'enregistre ici automatiquement.</div>'; return; }
+  if(!tous.length){ box.innerHTML='<div class="card sub">Rien encore. Chaque journée saisie s\'enregistre ici automatiquement.</div>'; return; }
+  if(!jours.length){ box.innerHTML='<div class="card sub">Aucune tournée enregistrée le '+dateFr(choix)+'</div>'; return; }
   for(const j of jours){
     const d=S.historique[j], col=d.arrets.filter(a=>!a.x), livres=col.filter(a=>a.f).length;
     const ts=d.arrets.map(a=>a.t).filter(Boolean), deb=ts.length?Math.min(...ts):null, fin=ts.length?Math.max(...ts):null;
-    const el=document.createElement("details"); el.className="card";
+    const el=document.createElement("details"); el.className="card"; el.open = !!choix;
     el.innerHTML=`<summary><span class="jour"><span>${dateFr(j)}</span><span class="sub">${d.colis} colis · ${col.length} arrêts${d.km?" · "+d.km+" km":""}</span></span></summary>
       <div class="sub" style="margin:6px 0">${livres}/${col.length} arrêts livrés${deb?" · de "+heure(deb)+" à "+heure(fin):""}</div>
       <ul class="list">${d.arrets.map(a=>`<li><span class="num">${a.r??""}</span><div class="main"><div>${esc(court(a.l))}</div><div class="sub">${a.x?"point fixe":a.n+" colis"}${a.f?" · livré "+heure(a.t):""}</div></div></li>`).join("")}</ul>`;
     box.appendChild(el);
   }
 }
-$("h-q").addEventListener("input",()=>{
-  const q=norm($("h-q").value), box=$("h-res");
+function chercherHisto(){
+  const q=norm($("h-q").value), box=$("h-res"), choix=$("h-date").value;
   if(q.length<2){ box.hidden=true; return; }
+  if(choix){   // un jour précis : on liste les arrêts trouvés ce jour-là
+    const d=S.historique[choix];
+    const res = d ? d.arrets.filter(a=>!a.x && norm(a.l).includes(q)) : [];
+    box.hidden=false;
+    box.innerHTML = res.length ? `<div class="sub">${dateFr(choix)}</div><ul class="list">${res.map(a=>`<li><span class="num">${a.r??""}</span><div class="main"><div>${esc(court(a.l))}</div><div class="sub">${a.n} colis · ${a.f?"livré "+heure(a.t):"non livré"}</div></div></li>`).join("")}</ul>` : '<div class="sub">Aucune adresse trouvée ce jour-là.</div>';
+    return;
+  }
   const m=new Map();
   for(const [j,d] of Object.entries(S.historique)) for(const a of d.arrets){
     if(a.x || !norm(a.l).includes(q)) continue;
@@ -849,7 +863,10 @@ $("h-q").addEventListener("input",()=>{
   const res=[...m.values()].sort((a,b)=>b.fois-a.fois).slice(0,30);
   box.hidden=false;
   box.innerHTML = res.length ? `<ul class="list">${res.map(e=>`<li><div class="main"><div>${esc(court(e.l))}</div><div class="sub">${e.fois} jour${e.fois>1?"s":""} · ${e.colis} colis · dernier : ${dateFr(e.der)}</div></div></li>`).join("")}</ul>` : '<div class="sub">Aucune adresse trouvée.</div>';
-});
+}
+$("h-q").addEventListener("input", chercherHisto);
+$("h-date").addEventListener("change", ()=>{ rendreHisto(); chercherHisto(); });
+$("h-tous").onclick = ()=>{ $("h-date").value=""; rendreHisto(); chercherHisto(); };
 $("h-csv").onclick=()=>{
   const lignes=[["date","numero_tri","adresse","colis","livre","heure_livraison","point_fixe"]];
   for(const j of Object.keys(S.historique).sort()) for(const a of S.historique[j].arrets)
