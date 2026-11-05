@@ -177,7 +177,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.5</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.6</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -262,7 +262,7 @@ function photoDuJour(){
     colis: S.colis.length,
     km: S.plan ? +S.plan.km.toFixed(1) : null,
     min: S.plan ? Math.round(S.plan.min) : null,
-    arrets: arrets.map(a=>({r:a.rang??null, l:a.label, n:a.n, f:!!a.fait, t:a.t||null, x:a.type==="fixe"}))
+    arrets: arrets.filter(a=>a.type!=="retour").map(a=>({r:a.rang??null, l:a.label, n:a.n, f:!!a.fait, t:a.t||null, x:a.type==="fixe"}))
   };
   const jours = Object.keys(S.historique).sort();
   while(jours.length>150) delete S.historique[jours.shift()];
@@ -482,12 +482,14 @@ async function matrice(pts, onProg){
    OPTIMISATION (voyageur de commerce, départ fixe, retour optionnel)
    plus proche voisin, puis améliorations 2-opt et Or-opt
    ===================================================================== */
-function optimiser(D, depart, retour, budgetMs=4000){
-  const n = D.length, reste = [...Array(n).keys()].filter(i=>i!==depart);
+function optimiser(D, depart, retour, budgetMs=4000, fin=null){
+  // fin : index d'un point d'arrivée imposé (ex. dépôt quand on part de sa position GPS)
+  const n = D.length, reste = [...Array(n).keys()].filter(i=>i!==depart && i!==fin);
+  if(fin!==null) retour = false;
   // 1) plus proche voisin
   let tour=[], cur=depart, libres=new Set(reste);
   while(libres.size){ let best=null,bd=Infinity; for(const k of libres){ if(D[cur][k]<bd){bd=D[cur][k];best=k;} } tour.push(best); libres.delete(best); cur=best; }
-  const cout = t => { let c=D[depart][t[0]]||0; for(let i=1;i<t.length;i++) c+=D[t[i-1]][t[i]]; if(retour&&t.length) c+=D[t[t.length-1]][depart]; return c; };
+  const cout = t => { let c=D[depart][t[0]]||0; for(let i=1;i<t.length;i++) c+=D[t[i-1]][t[i]]; if(retour&&t.length) c+=D[t[t.length-1]][depart]; if(fin!==null) c+=D[t.length?t[t.length-1]:depart][fin]; return c; };
   let best = cout(tour); const t0 = performance.now();
   let mieux = true;
   while(mieux && performance.now()-t0 < budgetMs){
@@ -543,7 +545,7 @@ function maPosition(){
    ===================================================================== */
 async function calculer(depuisGPS, arretsSource){
   const st = $("st-opt"), btn = $("b-opt");
-  const arrets = arretsSource || grouper();
+  const arrets = (arretsSource || grouper()).filter(a=>a.type!=="retour");
   if(!arrets.length){ statut(st,"Ajoute des colis d'abord.",true); return; }
   let dep;
   if(depuisGPS || S.departGPS){ try{ statut(st,"Localisation…"); const p = await maPosition(); dep = {type:"depot",label:"Ma position",...p}; }catch(e){ statut(st,e.message,true); return; } }
@@ -551,20 +553,25 @@ async function calculer(depuisGPS, arretsSource){
   else { statut(st,"Renseigne l'adresse du dépôt dans Réglages.",true); return; }
   btn.disabled = true;
   try{
-    const pts = [dep, ...arrets];
+    const retour = S.retour && !!S.depot;
+    const depotSep = retour && dep.label==="Ma position";   // départ GPS : le dépôt est un point d'arrivée à part
+    const pts = depotSep ? [dep, ...arrets, {type:"depot", ...S.depot}] : [dep, ...arrets];
     const {D, secours} = await matrice(pts,(a,b)=>statut(st,`Temps de trajet… ${a}/${b}`));
     statut(st,"Optimisation…");
     await new Promise(r=>setTimeout(r,20));
-    const retour = S.retour && !depuisGPS;
-    const {tour} = optimiser(D, 0, retour);
+    const fin = depotSep ? pts.length-1 : null;
+    const {tour} = optimiser(D, 0, retour && !depotSep, 4000, fin);
     const ordre = tour.map(i=>pts[i]);
     statut(st,"Tracé…");
-    const chemin = [dep, ...ordre, ...(retour?[dep]:[])];
+    const arrivee = depotSep ? pts[fin] : dep;
+    const chemin = [dep, ...ordre, ...(retour?[arrivee]:[])];
     const {geom, legs} = await trace(chemin);
     const km = legs.reduce((a,l)=>a+l.m,0)/1000, min = legs.reduce((a,l)=>a+l.s,0)/60;
-    S.plan = { depart:dep, retour, arrets: ordre.map((a,i)=>({...a, rang: a.rang ?? i+1, fait:false, leg:legs[i]})), geom, km, min, secours };
+    const liste = ordre.map((a,i)=>({...a, rang: a.rang ?? i+1, fait:false, leg:legs[i]}));
+    if(retour) liste.push({type:"retour", label:"Retour au dépôt · "+S.depot.label, lat:S.depot.lat, lon:S.depot.lon, n:0, tournees:[], precis:true, rang:"D", fait:false, leg:legs[ordre.length]});
+    S.plan = { depart:dep, retour, arrets: liste, geom, km, min, secours };
     sauver();
-    statut(st, `${ordre.length} arrêts · ${km.toFixed(1)} km · ${Math.round(min)} min de route`+(secours?" (estimation, service d'itinéraire injoignable)":""));
+    statut(st, `${ordre.length} arrêts${retour?" + retour dépôt":""} · ${km.toFixed(1)} km · ${Math.round(min)} min de route`+(secours?" (estimation, service d'itinéraire injoignable)":""));
     rendreTri();
     return true;
   }catch(e){ statut(st,"Erreur : "+e.message,true); }
@@ -587,7 +594,8 @@ function rendreTri(){
   $("tri-help").textContent = modeTri==="liv"
     ? "Écris le numéro au marqueur sur chaque colis."
     : "Charge dans cet ordre : le premier va au fond, le dernier à portée de main.";
-  const liste = modeTri==="liv"? S.plan.arrets : [...S.plan.arrets].reverse();
+  const sansRetour = S.plan.arrets.filter(x=>x.type!=="retour");
+  const liste = modeTri==="liv"? sansRetour : [...sansRetour].reverse();
   for(const x of liste){
     const li = document.createElement("li");
     const tags = x.type==="fixe" ? '<span class="tag">point fixe</span>'
@@ -677,7 +685,7 @@ function listeProchains(){
   if(!p.hidden && p.dataset.mode==="liste"){ p.hidden=true; p.innerHTML=""; return; }
   p.dataset.mode="liste"; p.hidden=false;
   const reste = S.plan.arrets.filter(a=>!a.fait);
-  p.innerHTML = `<ul class="list">${reste.slice(0,15).map(a=>`<li><span class="num">${a.rang}</span><div class="main"><div>${esc(a.label.replace(/\s\d{5}\s.*$/,""))}</div><div class="sub">${a.type==="fixe"?"point fixe":a.n+" colis"}</div></div></li>`).join("")}</ul>`
+  p.innerHTML = `<ul class="list">${reste.slice(0,15).map(a=>`<li><span class="num">${a.rang}</span><div class="main"><div>${esc(a.label.replace(/\s\d{5}\s.*$/,""))}</div><div class="sub">${a.type==="retour"?"dernier arrêt":a.type==="fixe"?"point fixe":a.n+" colis"}</div></div></li>`).join("")}</ul>`
     + (reste.length>15?`<div class="sub">+ ${reste.length-15} autres arrêts</div>`:"");
 }
 
@@ -687,7 +695,15 @@ function rendreLivrer(){
   coucheRoute.clearLayers(); coucheMk.clearLayers();
   if(!S.plan){ card.innerHTML='<div class="sub">Aucune tournée calculée.</div>'; if(coucheVert) coucheVert.clearLayers(); return; }
   const c = courant(), faits = S.plan.arrets.filter(a=>a.fait).length, tot = S.plan.arrets.length;
-  if(c){
+  if(c && c.type==="retour"){
+    card.innerHTML = `<div class="sub">Dernier arrêt · ${faits} / ${tot-1} faits</div>
+      <div class="addr">Retour au dépôt</div>
+      <div class="sub">${esc(S.depot ? S.depot.label : "")}</div>
+      <button class="btn ok big" id="b-ok" type="button">Arrivé au dépôt</button>
+      <div class="row" style="flex-wrap:wrap"><button class="btn small" id="b-add" type="button">+ Colis</button></div>
+      <div id="panel" hidden style="max-height:42vh;overflow:auto"></div>`;
+    $("b-ok").onclick = ()=>{ c.fait=true; c.t=Date.now(); sauver(); rendreLivrer(); };
+  } else if(c){
     const suiv = S.plan.arrets.filter(a=>!a.fait)[1];
     card.innerHTML = `<div class="sub">N° ${c.rang} · arrêt ${faits+1} / ${tot}</div>
       <div class="addr">${esc(c.label)}</div>
@@ -700,7 +716,10 @@ function rendreLivrer(){
       </div>
       <div id="panel" hidden style="max-height:42vh;overflow:auto"></div>`;
     $("b-ok").onclick = ()=>{ c.fait=true; c.t=Date.now(); sauver(); rendreLivrer(); };
-    $("b-skip").onclick = ()=>{ const i=S.plan.arrets.indexOf(c); S.plan.arrets.splice(i,1); S.plan.arrets.push(c); sauver(); rendreLivrer(); };
+    $("b-skip").onclick = ()=>{   // repoussé en fin de tournée, juste avant le retour au dépôt
+      const i=S.plan.arrets.indexOf(c); S.plan.arrets.splice(i,1);
+      const r=S.plan.arrets.findIndex(x=>x.type==="retour");
+      S.plan.arrets.splice(r<0?S.plan.arrets.length:r,0,c); sauver(); rendreLivrer(); };
     $("b-next").onclick = listeProchains;
     $("b-edit").onclick = ()=>{ $("panel").dataset.mode="form"; formAdresse("Corriger : "+c.label, async a=>{
       const ancienne = c.cle || norm(c.label);
@@ -708,9 +727,14 @@ function rendreLivrer(){
       Object.assign(c,{label:a.label,lat:a.lat,lon:a.lon,cle:a.cle,precis:a.precis,tournees:a.tournees});
       vert=null; sauver();
     }); };
+  } else {
+    card.innerHTML = `<div class="addr">Tournée terminée</div><div class="sub">${S.plan.arrets.filter(a=>a.type!=="retour").length} arrêts livrés.</div>`;
+  }
+  if(c && $("b-add")){
     $("b-add").onclick = ()=>{ $("panel").dataset.mode="form"; formAdresse("Ajouter un colis", async a=>{
       S.colis.push(a);
-      const reste = S.plan.arrets.filter(x=>!x.fait);
+      const reste = S.plan.arrets.filter(x=>!x.fait && x.type!=="retour");
+      const retourArr = S.plan.arrets.find(x=>x.type==="retour" && !x.fait);
       const deja = reste.find(x=>(x.cle||norm(x.label))===a.cle);
       if(deja){ deja.n++; sauver(); return; }
       // insertion au meilleur endroit parmi les arrêts restants (distance à vol d'oiseau)
@@ -718,28 +742,27 @@ function rendreLivrer(){
       const prev0 = fs.length ? fs[fs.length-1] : S.plan.depart;
       let best=0, bc=Infinity;
       for(let k=0;k<=reste.length;k++){
-        const A = k===0 ? prev0 : reste[k-1], B = reste[k];
+        const A = k===0 ? prev0 : reste[k-1], B = reste[k] || retourArr;
         const cout = vol(A,a) + (B? vol(a,B)-vol(A,B) : 0);
         if(cout<bc){ bc=cout; best=k; }
       }
       const maxRang = Math.max(0,...S.plan.arrets.map(x=>+x.rang||0));
       const arret = {type:"colis", label:a.label, lat:a.lat, lon:a.lon, cle:a.cle, n:1, tournees:a.tournees, precis:a.precis, rang:maxRang+1, fait:false};
-      const pos = best<reste.length ? S.plan.arrets.indexOf(reste[best]) : S.plan.arrets.length;
+      const pos = best<reste.length ? S.plan.arrets.indexOf(reste[best]) : (retourArr ? S.plan.arrets.indexOf(retourArr) : S.plan.arrets.length);
       S.plan.arrets.splice(pos,0,arret);
       statut($("st-opt"),"");
       vert=null; sauver();
       setTimeout(()=>alerteNum(arret.rang),50);
     }); };
-  } else {
-    card.innerHTML = `<div class="addr">Tournée terminée</div><div class="sub">${tot} arrêts livrés.</div>`;
   }
   // trajet complet en bleu, tronçon à faire en vert gras par-dessus
   L.polyline(S.plan.geom,{color:"#2f6fb0",weight:4,opacity:.55}).addTo(coucheRoute);
   if(c){ dessinerVert(); tronconVert(c); } else if(coucheVert) coucheVert.clearLayers();
   const d = S.plan.depart;
-  L.marker([d.lat,d.lon],{icon:L.divIcon({className:"",html:'<div class="mk dep">D</div>',iconSize:[28,28]})}).addTo(coucheMk);
+  if(!S.plan.arrets.some(a=>a.type==="retour"))
+    L.marker([d.lat,d.lon],{icon:L.divIcon({className:"",html:'<div class="mk dep">D</div>',iconSize:[28,28]})}).addTo(coucheMk);
   for(const a of S.plan.arrets){
-    const cls = a.fait?"done":(a===c?"cur":"");
+    const cls = (a.type==="retour"?"dep ":"")+(a.fait?"done":(a===c?"cur":""));
     const sz = a===c?36:28;
     L.marker([a.lat,a.lon],{icon:L.divIcon({className:"",html:`<div class="mk ${cls}">${a.rang}</div>`,iconSize:[sz,sz]}),zIndexOffset:a===c?500:0})
       .bindPopup("N° "+a.rang+"<br>"+esc(a.label)+(a.n>1?"<br>"+a.n+" colis":"")).addTo(coucheMk);
