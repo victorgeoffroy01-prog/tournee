@@ -51,6 +51,8 @@ input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid v
 .btn.small{min-height:36px;padding:6px 10px;font-size:.9rem}
 .sugg{display:flex;flex-wrap:wrap;gap:6px}
 .chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 12px;font-size:.95rem;cursor:pointer}
+.chip.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.chip.on small{color:inherit}
 .chip small{color:var(--muted)}
 .list{list-style:none;margin:0;padding:0}
 .list li{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
@@ -98,7 +100,8 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET COLIS ============ -->
 <section id="view-colis" class="wrap stack">
-  <header class="top"><h1>Colis du jour</h1><span class="count" id="cnt"></span></header>
+  <header class="top"><h1 id="ch-titre">Chargement 1</h1><span class="count" id="cnt"></span></header>
+  <div class="sugg" id="ch-liste"></div>
 
   <div class="card stack">
     <form id="f-add" class="stack" autocomplete="off">
@@ -130,6 +133,8 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
   <div class="card stack">
     <button class="btn primary big" id="b-opt" type="button">Calculer la tournée</button>
     <div class="status" id="st-opt"></div>
+    <button class="btn big" id="b-finch" type="button">Fin du chargement</button>
+    <div class="sub" id="finch-aide"></div>
   </div>
 
   <div class="confirm" id="reset-zone">
@@ -139,7 +144,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET TRI ============ -->
 <section id="view-tri" class="wrap stack" hidden>
-  <header class="top"><h1>Tri</h1><span class="count" id="tri-sum"></span></header>
+  <header class="top"><h1 id="tri-titre">Tri</h1><span class="count" id="tri-sum"></span></header>
   <div class="seg" role="tablist">
     <button id="seg-liv" class="on" type="button">Ordre de livraison</button>
     <button id="seg-chg" type="button">Ordre de chargement</button>
@@ -177,7 +182,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.6</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.7</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -250,19 +255,40 @@ let S = charger() || {
   plan: null              // {arrets:[...], km, min, geom}
 };
 function charger(){ try{ return JSON.parse(localStorage.getItem(KEY)); }catch(e){ return null; } }
+/* Chargements (chariots) de la journée : chacun a ses colis, sa tournée et ses numéros.
+   S.edit = chargement affiché dans Colis / Tri ; Livrer suit le premier chargement non terminé. */
+if(!S.charges){ S.charges = [{colis:S.colis||[], plan:S.plan||null}]; delete S.colis; delete S.plan; }
+if(S.edit==null || S.edit>=S.charges.length) S.edit = S.charges.length-1;
+function idxLivre(){
+  const i = S.charges.findIndex(c=>c.plan && c.plan.arrets.some(a=>!a.fait));
+  if(i>=0) return i;
+  for(let k=S.charges.length-1;k>=0;k--) if(S.charges[k].plan) return k;
+  return S.edit;
+}
+Object.defineProperty(S,"colis",{get:()=>S.charges[S.edit].colis, set:v=>{S.charges[S.edit].colis=v;}, enumerable:false, configurable:true});
+Object.defineProperty(S,"plan", {get:()=>S.charges[S.edit].plan,  set:v=>{S.charges[S.edit].plan=v;},  enumerable:false, configurable:true});
+Object.defineProperty(S,"lcolis",{get:()=>S.charges[idxLivre()].colis, enumerable:false, configurable:true});
+Object.defineProperty(S,"lplan", {get:()=>S.charges[idxLivre()].plan, set:v=>{S.charges[idxLivre()].plan=v;}, enumerable:false, configurable:true});
+const totalColis = () => S.charges.reduce((s,c)=>s+c.colis.length,0);
+function nouvelleJournee(){ S.charges=[{colis:[],plan:null}]; S.edit=0; }
 S.historique = S.historique || {};   // {"2026-11-05": {colis, km, min, arrets:[{r,l,n,f,t}]}}
 const aujourdhui = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 
 /* Photo de la journée en cours, mise à jour à chaque enregistrement */
 function photoDuJour(){
-  if(!S.colis.length){ S.jour = null; return; }
+  if(!totalColis()){ S.jour = null; return; }
   if(!S.jour) S.jour = aujourdhui();
-  const arrets = S.plan ? S.plan.arrets : grouper();
+  const plans = S.charges.map(c=>c.plan).filter(Boolean);
+  const arrets = [];
+  S.charges.forEach((c,k)=>{
+    const liste = c.plan ? c.plan.arrets : grouperDe(c.colis, k===0);
+    liste.filter(a=>a.type!=="retour").forEach(a=>arrets.push({c:k+1, r:a.rang??null, l:a.label, n:a.n, f:!!a.fait, t:a.t||null, x:a.type==="fixe"}));
+  });
   S.historique[S.jour] = {
-    colis: S.colis.length,
-    km: S.plan ? +S.plan.km.toFixed(1) : null,
-    min: S.plan ? Math.round(S.plan.min) : null,
-    arrets: arrets.filter(a=>a.type!=="retour").map(a=>({r:a.rang??null, l:a.label, n:a.n, f:!!a.fait, t:a.t||null, x:a.type==="fixe"}))
+    colis: totalColis(), chargements: S.charges.length,
+    km: plans.length ? +plans.reduce((s,p)=>s+p.km,0).toFixed(1) : null,
+    min: plans.length ? Math.round(plans.reduce((s,p)=>s+p.min,0)) : null,
+    arrets
   };
   const jours = Object.keys(S.historique).sort();
   while(jours.length>150) delete S.historique[jours.shift()];
@@ -404,11 +430,12 @@ $("b-bulk").onclick = async ()=>{
 function rendreColis(){
   const ul = $("l-colis"); ul.innerHTML="";
   $("cnt").textContent = S.colis.length+" colis · "+grouper().length+" arrêts";
-  if(S.jour && S.jour!==aujourdhui() && S.colis.length){
+  rendreChargements();
+  if(S.jour && S.jour!==aujourdhui() && totalColis()){
     const li=document.createElement("li");
     li.innerHTML=`<div class="banner main"><div>Ces colis datent du ${dateFr(S.jour)}. Ils sont déjà dans l'historique.</div><button class="btn primary" type="button" id="b-new">Commencer la journée</button></div>`;
     ul.appendChild(li);
-    li.querySelector("#b-new").onclick=()=>{ S.colis=[]; S.plan=null; sauver(); rendreColis(); statut($("st-opt"),""); };
+    li.querySelector("#b-new").onclick=()=>{ nouvelleJournee(); sauver(); rendreColis(); statut($("st-opt"),""); };
   }
   if(!S.colis.length){ ul.innerHTML = '<li class="sub">Aucun colis. Tape un numéro puis 2-3 lettres de la rue.</li>'; return; }
   [...S.colis].reverse().forEach(c=>{
@@ -423,13 +450,37 @@ function rendreColis(){
   });
 }
 
+/* Chargements : onglets + fin de chargement */
+function rendreChargements(){
+  const n = S.edit+1, nb = S.charges.length;
+  $("ch-titre").textContent = "Chargement "+n;
+  const box = $("ch-liste"); box.innerHTML = "";
+  if(nb>1) S.charges.forEach((c,k)=>{
+    const b=document.createElement("button"); b.type="button"; b.className="chip"+(k===S.edit?" on":"");
+    b.innerHTML = "Ch. "+(k+1)+" <small>"+c.colis.length+" colis"+(c.plan?" · calculé":"")+"</small>";
+    b.onclick = ()=>{ S.edit=k; sauver(); rendreColis(); statut($("st-opt"), ""); };
+    box.appendChild(b);
+  });
+  const dernier = S.edit===nb-1, fin=$("b-finch"), aide=$("finch-aide");
+  fin.hidden = !dernier;
+  fin.disabled = !S.plan;
+  fin.textContent = "Fin du chargement "+n+" · commencer le "+(n+1);
+  aide.textContent = !dernier ? "" : (S.plan ? "Le chargement "+(n+1)+" partira de la fin de celui-ci, avec ses propres numéros." : "Calcule la tournée et fais le tri avant de finir le chargement.");
+}
+$("b-finch").onclick = ()=>{
+  if(!S.plan) return;
+  S.charges.push({colis:[], plan:null}); S.edit = S.charges.length-1;
+  sauver(); rendreColis(); statut($("st-opt"),""); statut($("st-add"),"Chargement "+(S.edit+1)+" : saisis les colis du chariot suivant.");
+  fNum.focus();
+};
+
 /* Vider la journée (confirmation dans la page) */
 function boutonVider(){
   const z = $("reset-zone");
   z.innerHTML = '<button class="btn small" id="b-reset" type="button">Vider la journée</button>';
   $("b-reset").onclick = ()=>{
-    z.innerHTML = '<span>Supprimer tous les colis du jour ?</span><button class="btn small" id="r-ok" type="button" style="background:var(--bad);color:#fff">Oui, vider</button><button class="btn small" id="r-no" type="button">Annuler</button>';
-    $("r-ok").onclick = ()=>{ S.colis=[]; S.plan=null; sauver(); boutonVider(); rendreColis(); statut($("st-opt"),""); };
+    z.innerHTML = '<span>Supprimer tous les chargements du jour ?</span><button class="btn small" id="r-ok" type="button" style="background:var(--bad);color:#fff">Oui, vider</button><button class="btn small" id="r-no" type="button">Annuler</button>';
+    $("r-ok").onclick = ()=>{ nouvelleJournee(); sauver(); boutonVider(); rendreColis(); statut($("st-opt"),""); };
     $("r-no").onclick = boutonVider;
   };
 }
@@ -438,14 +489,15 @@ boutonVider();
 /* =====================================================================
    REGROUPEMENT EN ARRÊTS
    ===================================================================== */
-function grouper(){
+function grouper(){ return grouperDe(S.colis, S.edit===0); }
+function grouperDe(colis, avecFixes){
   const m = new Map();
-  for(const c of S.colis){
+  for(const c of colis){
     if(!m.has(c.cle)) m.set(c.cle,{type:"colis", label:c.label, lat:c.lat, lon:c.lon, n:0, tournees:c.tournees, precis:c.precis});
     m.get(c.cle).n++;
   }
   const arrets = [...m.values()];
-  for(const f of S.fixes) if(f.actif && f.lat) arrets.push({type:"fixe", label:f.nom+" · "+f.label, lat:f.lat, lon:f.lon, n:0, tournees:[], precis:true});
+  if(avecFixes) for(const f of S.fixes) if(f.actif && f.lat) arrets.push({type:"fixe", label:f.nom+" · "+f.label, lat:f.lat, lon:f.lon, n:0, tournees:[], precis:true});
   return arrets;
 }
 
@@ -543,18 +595,25 @@ function maPosition(){
 /* =====================================================================
    CALCUL COMPLET
    ===================================================================== */
-async function calculer(depuisGPS, arretsSource){
+async function calculer(depuisGPS, arretsSource, cible){
   const st = $("st-opt"), btn = $("b-opt");
+  if(cible==null) cible = S.edit;
+  const ch = S.charges[cible];
   const arrets = (arretsSource || grouper()).filter(a=>a.type!=="retour");
   if(!arrets.length){ statut(st,"Ajoute des colis d'abord.",true); return; }
+  // fin du chargement précédent (dernier arrêt hors retour) = point de départ de celui-ci
+  const prec = cible>0 ? S.charges[cible-1].plan : null;
+  const finPrec = prec ? [...prec.arrets].reverse().find(a=>a.type!=="retour") : null;
   let dep;
   if(depuisGPS || S.departGPS){ try{ statut(st,"Localisation…"); const p = await maPosition(); dep = {type:"depot",label:"Ma position",...p}; }catch(e){ statut(st,e.message,true); return; } }
+  else if(finPrec){ dep = {type:"depot", label:"Fin du chargement "+cible, lat:finPrec.lat, lon:finPrec.lon, horsDepot:true}; }
   else if(S.depot){ dep = {type:"depot", ...S.depot}; }
   else { statut(st,"Renseigne l'adresse du dépôt dans Réglages.",true); return; }
   btn.disabled = true;
   try{
-    const retour = S.retour && !!S.depot;
-    const depotSep = retour && dep.label==="Ma position";   // départ GPS : le dépôt est un point d'arrivée à part
+    // retour au dépôt seulement pour le dernier chargement calculé
+    const retour = S.retour && !!S.depot && !S.charges.slice(cible+1).some(c=>c.plan);
+    const depotSep = retour && (dep.label==="Ma position" || dep.horsDepot);   // le dépôt est un point d'arrivée à part
     const pts = depotSep ? [dep, ...arrets, {type:"depot", ...S.depot}] : [dep, ...arrets];
     const {D, secours} = await matrice(pts,(a,b)=>statut(st,`Temps de trajet… ${a}/${b}`));
     statut(st,"Optimisation…");
@@ -569,7 +628,9 @@ async function calculer(depuisGPS, arretsSource){
     const km = legs.reduce((a,l)=>a+l.m,0)/1000, min = legs.reduce((a,l)=>a+l.s,0)/60;
     const liste = ordre.map((a,i)=>({...a, rang: a.rang ?? i+1, fait:false, leg:legs[i]}));
     if(retour) liste.push({type:"retour", label:"Retour au dépôt · "+S.depot.label, lat:S.depot.lat, lon:S.depot.lon, n:0, tournees:[], precis:true, rang:"D", fait:false, leg:legs[ordre.length]});
-    S.plan = { depart:dep, retour, arrets: liste, geom, km, min, secours };
+    ch.plan = { depart:dep, retour, arrets: liste, geom, km, min, secours };
+    // les chargements précédents ne reviennent plus au dépôt : on enchaîne
+    for(let k=0;k<cible;k++){ const pl=S.charges[k].plan; if(pl) pl.arrets = pl.arrets.filter(a=>a.type!=="retour" || a.fait); }
     sauver();
     statut(st, `${ordre.length} arrêts${retour?" + retour dépôt":""} · ${km.toFixed(1)} km · ${Math.round(min)} min de route`+(secours?" (estimation, service d'itinéraire injoignable)":""));
     rendreTri();
@@ -586,13 +647,14 @@ let modeTri = "liv";
 $("seg-liv").onclick = ()=>{ modeTri="liv"; rendreTri(); };
 $("seg-chg").onclick = ()=>{ modeTri="chg"; rendreTri(); };
 function rendreTri(){
+  $("tri-titre").textContent = S.charges.length>1 ? "Tri · chargement "+(S.edit+1) : "Tri";
   $("seg-liv").classList.toggle("on",modeTri==="liv"); $("seg-chg").classList.toggle("on",modeTri==="chg");
   const ul = $("l-tri"); ul.innerHTML="";
   if(!S.plan){ $("tri-sum").textContent=""; $("tri-help").textContent=""; ul.innerHTML='<li class="sub">Calcule la tournée dans l\'onglet Colis.</li>'; return; }
   const a = S.plan.arrets.filter(x=>x.type==="colis");
   $("tri-sum").textContent = a.reduce((s,x)=>s+x.n,0)+" colis";
   $("tri-help").textContent = modeTri==="liv"
-    ? "Écris le numéro au marqueur sur chaque colis."
+    ? "Écris le numéro au marqueur sur chaque colis"+(S.charges.length>1?" (les numéros repartent de 1 à chaque chargement).":".")
     : "Charge dans cet ordre : le premier va au fond, le dernier à portée de main.";
   const sansRetour = S.plan.arrets.filter(x=>x.type!=="retour");
   const liste = modeTri==="liv"? sansRetour : [...sansRetour].reverse();
@@ -623,16 +685,16 @@ function initCarte(){
     },()=>{}, {enableHighAccuracy:true, maximumAge:5000});
   }
 }
-function courant(){ return S.plan ? S.plan.arrets.find(a=>!a.fait) : null; }
+function courant(){ return S.lplan ? S.lplan.arrets.find(a=>!a.fait) : null; }
 /* Tronçon à faire jusqu'au prochain arrêt (vert), recalculé quand l'arrêt change */
 let vert = null;   // {cle, geom}
 async function tronconVert(c){
   const cle = c.lat+","+c.lon;
   if(vert && vert.cle===cle) return;
   vert = {cle, geom:null};
-  const faits = S.plan.arrets.filter(a=>a.fait);
+  const faits = S.lplan.arrets.filter(a=>a.fait);
   const o = mkMoi ? {lat:mkMoi.getLatLng().lat, lon:mkMoi.getLatLng().lng}
-          : (faits.length ? faits[faits.length-1] : S.plan.depart);
+          : (faits.length ? faits[faits.length-1] : S.lplan.depart);
   let geom = [[o.lat,o.lon],[c.lat,c.lon]];
   try{
     const r = await fetch(`${OSRM_URL}/route/v1/driving/${o.lon},${o.lat};${c.lon},${c.lat}?overview=full&geometries=geojson`,
@@ -684,7 +746,7 @@ function listeProchains(){
   const p = $("panel");
   if(!p.hidden && p.dataset.mode==="liste"){ p.hidden=true; p.innerHTML=""; return; }
   p.dataset.mode="liste"; p.hidden=false;
-  const reste = S.plan.arrets.filter(a=>!a.fait);
+  const reste = S.lplan.arrets.filter(a=>!a.fait);
   p.innerHTML = `<ul class="list">${reste.slice(0,15).map(a=>`<li><span class="num">${a.rang}</span><div class="main"><div>${esc(a.label.replace(/\s\d{5}\s.*$/,""))}</div><div class="sub">${a.type==="retour"?"dernier arrêt":a.type==="fixe"?"point fixe":a.n+" colis"}</div></div></li>`).join("")}</ul>`
     + (reste.length>15?`<div class="sub">+ ${reste.length-15} autres arrêts</div>`:"");
 }
@@ -693,8 +755,8 @@ function rendreLivrer(){
   initCarte(); setTimeout(()=>map.invalidateSize(),50);
   const card = $("stopcard");
   coucheRoute.clearLayers(); coucheMk.clearLayers();
-  if(!S.plan){ card.innerHTML='<div class="sub">Aucune tournée calculée.</div>'; if(coucheVert) coucheVert.clearLayers(); return; }
-  const c = courant(), faits = S.plan.arrets.filter(a=>a.fait).length, tot = S.plan.arrets.length;
+  if(!S.lplan){ card.innerHTML='<div class="sub">Aucune tournée calculée.</div>'; if(coucheVert) coucheVert.clearLayers(); return; }
+  const c = courant(), faits = S.lplan.arrets.filter(a=>a.fait).length, tot = S.lplan.arrets.length;
   if(c && c.type==="retour"){
     card.innerHTML = `<div class="sub">Dernier arrêt · ${faits} / ${tot-1} faits</div>
       <div class="addr">Retour au dépôt</div>
@@ -704,8 +766,8 @@ function rendreLivrer(){
       <div id="panel" hidden style="max-height:42vh;overflow:auto"></div>`;
     $("b-ok").onclick = ()=>{ c.fait=true; c.t=Date.now(); sauver(); rendreLivrer(); };
   } else if(c){
-    const suiv = S.plan.arrets.filter(a=>!a.fait)[1];
-    card.innerHTML = `<div class="sub">N° ${c.rang} · arrêt ${faits+1} / ${tot}</div>
+    const suiv = S.lplan.arrets.filter(a=>!a.fait)[1];
+    card.innerHTML = `<div class="sub">${S.charges.length>1?"Chargement "+(idxLivre()+1)+" · ":""}N° ${c.rang} · arrêt ${faits+1} / ${tot}</div>
       <div class="addr">${esc(c.label)}</div>
       <div class="sub">${c.type==="fixe"?"Point fixe":c.n+" colis"}${suiv?" · ensuite : n° "+suiv.rang+", "+esc(suiv.label.replace(/\s\d{5}\s.*$/,"")):""}</div>
       <div class="grid2"><button class="btn ok big" id="b-ok" type="button">Livré</button><button class="btn big" id="b-skip" type="button">Passer</button></div>
@@ -715,53 +777,59 @@ function rendreLivrer(){
         <button class="btn small" id="b-add" type="button">+ Colis</button>
       </div>
       <div id="panel" hidden style="max-height:42vh;overflow:auto"></div>`;
-    $("b-ok").onclick = ()=>{ c.fait=true; c.t=Date.now(); sauver(); rendreLivrer(); };
+    $("b-ok").onclick = ()=>{
+      const k=idxLivre(); c.fait=true; c.t=Date.now(); sauver();
+      const suite = idxLivre()!==k;   // chargement terminé, on passe au suivant
+      vert=null; rendreLivrer();
+      if(suite) setTimeout(()=>infoPanel("Chargement "+(k+1)+" terminé. Place au chargement "+(idxLivre()+1)+"."),50);
+    };
     $("b-skip").onclick = ()=>{   // repoussé en fin de tournée, juste avant le retour au dépôt
-      const i=S.plan.arrets.indexOf(c); S.plan.arrets.splice(i,1);
-      const r=S.plan.arrets.findIndex(x=>x.type==="retour");
-      S.plan.arrets.splice(r<0?S.plan.arrets.length:r,0,c); sauver(); rendreLivrer(); };
+      const i=S.lplan.arrets.indexOf(c); S.lplan.arrets.splice(i,1);
+      const r=S.lplan.arrets.findIndex(x=>x.type==="retour");
+      S.lplan.arrets.splice(r<0?S.lplan.arrets.length:r,0,c); sauver(); rendreLivrer(); };
     $("b-next").onclick = listeProchains;
     $("b-edit").onclick = ()=>{ $("panel").dataset.mode="form"; formAdresse("Corriger : "+c.label, async a=>{
       const ancienne = c.cle || norm(c.label);
-      S.colis.forEach(k=>{ if(k.cle===ancienne) Object.assign(k,{label:a.label,lat:a.lat,lon:a.lon,cle:a.cle,precis:a.precis,saisie:a.saisie,tournees:a.tournees}); });
+      S.lcolis.forEach(k=>{ if(k.cle===ancienne) Object.assign(k,{label:a.label,lat:a.lat,lon:a.lon,cle:a.cle,precis:a.precis,saisie:a.saisie,tournees:a.tournees}); });
       Object.assign(c,{label:a.label,lat:a.lat,lon:a.lon,cle:a.cle,precis:a.precis,tournees:a.tournees});
       vert=null; sauver();
     }); };
   } else {
-    card.innerHTML = `<div class="addr">Tournée terminée</div><div class="sub">${S.plan.arrets.filter(a=>a.type!=="retour").length} arrêts livrés.</div>`;
+    const nbA = S.charges.reduce((s,ch)=>s+(ch.plan?ch.plan.arrets.filter(a=>a.type!=="retour").length:0),0);
+    card.innerHTML = `<div class="addr">Tournée terminée</div><div class="sub">${nbA} arrêts livrés${S.charges.length>1?" sur "+S.charges.length+" chargements":""}.</div>`;
   }
   if(c && $("b-add")){
     $("b-add").onclick = ()=>{ $("panel").dataset.mode="form"; formAdresse("Ajouter un colis", async a=>{
-      S.colis.push(a);
-      const reste = S.plan.arrets.filter(x=>!x.fait && x.type!=="retour");
-      const retourArr = S.plan.arrets.find(x=>x.type==="retour" && !x.fait);
+      S.lcolis.push(a);
+      const reste = S.lplan.arrets.filter(x=>!x.fait && x.type!=="retour");
+      const retourArr = S.lplan.arrets.find(x=>x.type==="retour" && !x.fait);
       const deja = reste.find(x=>(x.cle||norm(x.label))===a.cle);
       if(deja){ deja.n++; sauver(); return; }
       // insertion au meilleur endroit parmi les arrêts restants (distance à vol d'oiseau)
-      const fs = S.plan.arrets.filter(x=>x.fait);
-      const prev0 = fs.length ? fs[fs.length-1] : S.plan.depart;
+      const fs = S.lplan.arrets.filter(x=>x.fait);
+      const prev0 = fs.length ? fs[fs.length-1] : S.lplan.depart;
       let best=0, bc=Infinity;
       for(let k=0;k<=reste.length;k++){
         const A = k===0 ? prev0 : reste[k-1], B = reste[k] || retourArr;
         const cout = vol(A,a) + (B? vol(a,B)-vol(A,B) : 0);
         if(cout<bc){ bc=cout; best=k; }
       }
-      const maxRang = Math.max(0,...S.plan.arrets.map(x=>+x.rang||0));
+      const maxRang = Math.max(0,...S.lplan.arrets.map(x=>+x.rang||0));
       const arret = {type:"colis", label:a.label, lat:a.lat, lon:a.lon, cle:a.cle, n:1, tournees:a.tournees, precis:a.precis, rang:maxRang+1, fait:false};
-      const pos = best<reste.length ? S.plan.arrets.indexOf(reste[best]) : (retourArr ? S.plan.arrets.indexOf(retourArr) : S.plan.arrets.length);
-      S.plan.arrets.splice(pos,0,arret);
+      const pos = best<reste.length ? S.lplan.arrets.indexOf(reste[best]) : (retourArr ? S.lplan.arrets.indexOf(retourArr) : S.lplan.arrets.length);
+      S.lplan.arrets.splice(pos,0,arret);
       statut($("st-opt"),"");
       vert=null; sauver();
       setTimeout(()=>alerteNum(arret.rang),50);
     }); };
   }
   // trajet complet en bleu, tronçon à faire en vert gras par-dessus
-  L.polyline(S.plan.geom,{color:"#2f6fb0",weight:4,opacity:.55}).addTo(coucheRoute);
+  L.polyline(S.lplan.geom,{color:"#2f6fb0",weight:4,opacity:.55}).addTo(coucheRoute);
   if(c){ dessinerVert(); tronconVert(c); } else if(coucheVert) coucheVert.clearLayers();
-  const d = S.plan.depart;
-  if(!S.plan.arrets.some(a=>a.type==="retour"))
+  const d = S.lplan.depart;
+  if(!S.lplan.arrets.some(a=>a.type==="retour"))
     L.marker([d.lat,d.lon],{icon:L.divIcon({className:"",html:'<div class="mk dep">D</div>',iconSize:[28,28]})}).addTo(coucheMk);
-  for(const a of S.plan.arrets){
+  for(const a of S.lplan.arrets){
     const cls = (a.type==="retour"?"dep ":"")+(a.fait?"done":(a===c?"cur":""));
     const sz = a===c?36:28;
     L.marker([a.lat,a.lon],{icon:L.divIcon({className:"",html:`<div class="mk ${cls}">${a.rang}</div>`,iconSize:[sz,sz]}),zIndexOffset:a===c?500:0})
@@ -769,22 +837,23 @@ function rendreLivrer(){
   }
   if(c && !suivre) map.setView([c.lat,c.lon], Math.max(map.getZoom(),16));
 }
-/* Après ajout en tournée : rappel du numéro à écrire sur le colis */
-function alerteNum(n){
+/* Message dans le panneau de la carte (n° à écrire, changement de chargement…) */
+function infoPanel(txt){
   const p=$("panel"); if(!p) return;
   p.hidden=false; p.dataset.mode="info";
-  p.innerHTML=`<div class="stack"><strong>Écris le n° ${n} sur le colis.</strong><button class="btn small" type="button" id="pa-x">OK</button></div>`;
+  p.innerHTML=`<div class="stack"><strong>${esc(txt)}</strong><button class="btn small" type="button" id="pa-x">OK</button></div>`;
   $("pa-x").onclick=()=>{ p.hidden=true; p.innerHTML=""; };
 }
+const alerteNum = n => infoPanel("Écris le n° "+n+" sur le colis"+(S.charges.length>1?" (chargement "+(idxLivre()+1)+")":"")+".");
 $("b-follow").onclick = ()=>{ suivre=!suivre; $("b-follow").classList.toggle("primary",suivre); if(suivre&&mkMoi) map.setView(mkMoi.getLatLng(),17); };
-$("b-fit").onclick = ()=>{ if(S.plan) map.fitBounds(L.latLngBounds(S.plan.geom),{padding:[20,20]}); };
+$("b-fit").onclick = ()=>{ if(S.lplan) map.fitBounds(L.latLngBounds(S.lplan.geom),{padding:[20,20]}); };
 $("b-reopt").onclick = async ()=>{
-  if(!S.plan) return;
-  const restants = S.plan.arrets.filter(a=>!a.fait), faits = S.plan.arrets.filter(a=>a.fait);
+  if(!S.lplan) return;
+  const restants = S.lplan.arrets.filter(a=>!a.fait), faits = S.lplan.arrets.filter(a=>a.fait);
   if(!restants.length) return;
   $("b-reopt").textContent="Calcul…";
-  const ok = await calculer(true, restants.map(({fait,leg,...a})=>a));   // on garde les numéros écrits sur les colis
-  if(ok){ S.plan.arrets = faits.concat(S.plan.arrets); vert=null; sauver(); rendreTri(); }
+  const ok = await calculer(true, restants.map(({fait,leg,...a})=>a), idxLivre());   // on garde les numéros écrits sur les colis
+  if(ok){ S.lplan.arrets = faits.concat(S.lplan.arrets); vert=null; sauver(); rendreTri(); }
   $("b-reopt").textContent="Réoptimiser"; rendreLivrer();
 };
 
@@ -816,7 +885,7 @@ $("dep-ret").onchange = e=>{ S.retour=e.target.checked; S.plan=null; sauver(); }
 $("dep-gps").onchange = e=>{ S.departGPS=e.target.checked; S.plan=null; sauver(); };
 $("b-save-rues").onclick = ()=>{
   document.querySelectorAll("[data-tournee]").forEach(ta=>{ S.rues[ta.dataset.tournee] = ta.value.split("\n").map(s=>s.trim()).filter(Boolean); });
-  IDX = indexRues(); S.colis.forEach(c=>{ c.tournees = tourneesDe(c.label.replace(/^\S+\s/,"").split(/\s\d{5}/)[0]); });
+  IDX = indexRues(); S.charges.flatMap(ch=>ch.colis).forEach(c=>{ c.tournees = tourneesDe(c.label.replace(/^\S+\s/,"").split(/\s\d{5}/)[0]); });
   sauver(); statut($("st-rues"),"Rues enregistrées.");
 };
 function rendreReglages(){
@@ -861,9 +930,9 @@ function rendreHisto(){
     const d=S.historique[j], col=d.arrets.filter(a=>!a.x), livres=col.filter(a=>a.f).length;
     const ts=d.arrets.map(a=>a.t).filter(Boolean), deb=ts.length?Math.min(...ts):null, fin=ts.length?Math.max(...ts):null;
     const el=document.createElement("details"); el.className="card"; el.open = !!choix;
-    el.innerHTML=`<summary><span class="jour"><span>${dateFr(j)}</span><span class="sub">${d.colis} colis · ${col.length} arrêts${d.km?" · "+d.km+" km":""}</span></span></summary>
+    el.innerHTML=`<summary><span class="jour"><span>${dateFr(j)}</span><span class="sub">${d.colis} colis · ${col.length} arrêts${d.chargements>1?" · "+d.chargements+" ch.":""}${d.km?" · "+d.km+" km":""}</span></span></summary>
       <div class="sub" style="margin:6px 0">${livres}/${col.length} arrêts livrés${deb?" · de "+heure(deb)+" à "+heure(fin):""}</div>
-      <ul class="list">${d.arrets.map(a=>`<li><span class="num">${a.r??""}</span><div class="main"><div>${esc(court(a.l))}</div><div class="sub">${a.x?"point fixe":a.n+" colis"}${a.f?" · livré "+heure(a.t):""}</div></div></li>`).join("")}</ul>`;
+      <ul class="list">${d.arrets.map(a=>`<li><span class="num">${a.r??""}</span><div class="main"><div>${esc(court(a.l))}</div><div class="sub">${(d.chargements>1&&a.c)?"Ch. "+a.c+" · ":""}${a.x?"point fixe":a.n+" colis"}${a.f?" · livré "+heure(a.t):""}</div></div></li>`).join("")}</ul>`;
     box.appendChild(el);
   }
 }
@@ -891,9 +960,9 @@ $("h-q").addEventListener("input", chercherHisto);
 $("h-date").addEventListener("change", ()=>{ rendreHisto(); chercherHisto(); });
 $("h-tous").onclick = ()=>{ $("h-date").value=""; rendreHisto(); chercherHisto(); };
 $("h-csv").onclick=()=>{
-  const lignes=[["date","numero_tri","adresse","colis","livre","heure_livraison","point_fixe"]];
+  const lignes=[["date","chargement","numero_tri","adresse","colis","livre","heure_livraison","point_fixe"]];
   for(const j of Object.keys(S.historique).sort()) for(const a of S.historique[j].arrets)
-    lignes.push([j,a.r??"",a.l,a.n,a.f?"oui":"non",heure(a.t),a.x?"oui":"non"]);
+    lignes.push([j,a.c||1,a.r??"",a.l,a.n,a.f?"oui":"non",heure(a.t),a.x?"oui":"non"]);
   const csv="\ufeff"+lignes.map(l=>l.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(";")).join("\n");
   const url=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
   const a=document.createElement("a"); a.href=url; a.download="historique-tournees.csv"; document.body.appendChild(a); a.click(); a.remove();
