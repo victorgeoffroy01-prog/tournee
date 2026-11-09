@@ -182,7 +182,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.7</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.8</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -202,6 +202,12 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
     </div>
     <input id="fx-q" type="search" placeholder="Adresse du point">
     <div class="sugg" id="fx-sugg"></div>
+  </div>
+
+  <div class="card stack">
+    <h2>Adresses corrigées</h2>
+    <p class="sub">Positions posées à la main sur la carte (Livrer, toucher un arrêt, « Corriger sur la carte »). Elles servent à chaque nouvelle saisie.</p>
+    <ul class="list" id="l-corr"></ul>
   </div>
 
   <div class="card stack">
@@ -237,8 +243,8 @@ const BLOC     = 45;                                           // taille des blo
 /* Rues de départ, d'après les listes de tournées (modifiables dans Réglages) */
 const RUES_INIT = {
   "100": ["Rue de la Mairie","Place du 11 Novembre","Hippodrome","Grandes Maisons","Iris","Tamaris","Muguet","Primevères","Campanules","Jonquilles","Rue des Petits Clos","Pervenches","Cyclamens","Berchottière","Impasse des Clématites","Rue des Millepertuis","Allée des Millepertuis","Mesliers","Impasse des Mesliers","Jasmins","Grenouillère","Rainettes","Charmes","Marnière","Érables","Ornano","Prunus","Forêt","Bad Camberg","Turone","Joué","Nière","Fusains","Plaine","Avenir","Vignes","Petites Maisons","Abricotiers","Pêchers","Groseilliers","Cerisiers","Amandiers","Pommiers","Jean de la Fontaine"],
-  "101": ["Platanes","Rue des Tilleuls","Hameau des Tilleuls","Brûlée","8 Mai","Roses","Violettes","Forêt","Buissons","Mésanges","Acacias","Frênes","Allée des Aulnes","Impasse des Aulnes","Bouleaux","Cytises","Suzanne Flon","Place Voru","Roland Pilain","Marie Laurencin","Barbara","Petites Maisons","Samuel Morse","Charles Bourseul","Avenue de la République","Boris Vian","Léonard de Vinci","Charpentier","Pinaigrier","Sicard"],
-  "107": ["Avenue de la République","Rue de la Cour","Barillerie","Laloux","Mansart","Le Nôtre","Félix Dujardin","Petite Alouette","Avenue du Général de Gaulle","Fleuriau","Rabelais","Honoré de Balzac","Boylesve","Paul-Louis Courier","Anatole France","Ronsard","Impasse Ronsard","Alfred de Vigny","Rosnay","Jules Romains","Archerie","Malarderie","Fosse Primault","Richelieu","Rue de la Branchoire","Avenue de Beaugaillard","Rue des Chardonnets","Avenue de la Branchoire","Roitelets","Horizon Vert","Fauvettes","Rossignols","Bouvreuils"]
+  "101": ["Platanes","Rue des Tilleuls","Allée des Tilleuls","Hameau des Tilleuls","Brûlée","8 Mai","Roses","Violettes","Forêt","Buissons","Mésanges","Acacias","Frênes","Allée des Aulnes","Impasse des Aulnes","Bouleaux","Cytises","Suzanne Flon","Place Voru","Roland Pilain","Marie Laurencin","Barbara","Petites Maisons","Samuel Morse","Charles Bourseul","Avenue de la République","Boris Vian","Léonard de Vinci","Charpentier","Pinaigrier","Sicard"],
+  "107": ["Avenue de la République","Rue de la Cour","Barillerie","Laloux","Mansart","Le Nôtre","Félix Dujardin","Petite Alouette","Avenue du Général de Gaulle","Fleuriau","Rabelais","Honoré de Balzac","Boylesve","Paul-Louis Courier","Anatole France","Ronsard","Impasse Ronsard","Alfred de Vigny","Rosnay","Jules Romains","Archerie","Malarderie","Fosse Primault","Richelieu","Rue de la Branchoire","Avenue de Beaugaillard","Rue du Chardonneret","Avenue de la Branchoire","Roitelets","Horizon Vert","Fauvettes","Rossignols","Bouvreuils"]
 };
 
 /* =====================================================================
@@ -259,7 +265,9 @@ function charger(){ try{ return JSON.parse(localStorage.getItem(KEY)); }catch(e)
    S.edit = chargement affiché dans Colis / Tri ; Livrer suit le premier chargement non terminé. */
 if(!S.charges){ S.charges = [{colis:S.colis||[], plan:S.plan||null}]; delete S.colis; delete S.plan; }
 if(S.edit==null || S.edit>=S.charges.length) S.edit = S.charges.length-1;
+S.corrections = S.corrections || {};   // saisie simplifiée -> {label, lat, lon, tournees}
 function idxLivre(){
+  if(S.livChoix!=null && S.charges[S.livChoix] && S.charges[S.livChoix].plan) return S.livChoix;   // choisi à la main
   const i = S.charges.findIndex(c=>c.plan && c.plan.arrets.some(a=>!a.fait));
   if(i>=0) return i;
   for(let k=S.charges.length-1;k>=0;k--) if(S.charges[k].plan) return k;
@@ -270,7 +278,7 @@ Object.defineProperty(S,"plan", {get:()=>S.charges[S.edit].plan,  set:v=>{S.char
 Object.defineProperty(S,"lcolis",{get:()=>S.charges[idxLivre()].colis, enumerable:false, configurable:true});
 Object.defineProperty(S,"lplan", {get:()=>S.charges[idxLivre()].plan, set:v=>{S.charges[idxLivre()].plan=v;}, enumerable:false, configurable:true});
 const totalColis = () => S.charges.reduce((s,c)=>s+c.colis.length,0);
-function nouvelleJournee(){ S.charges=[{colis:[],plan:null}]; S.edit=0; }
+function nouvelleJournee(){ S.charges=[{colis:[],plan:null}]; S.edit=0; S.livChoix=null; }
 S.historique = S.historique || {};   // {"2026-11-05": {colis, km, min, arrets:[{r,l,n,f,t}]}}
 const aujourdhui = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 
@@ -314,6 +322,11 @@ function indexRues(){
   }
   return m;
 }
+if(!S.migr2){   // mise à jour des rues déjà enregistrées sur le téléphone
+  const t101 = S.rues["101"]||[]; if(!t101.some(r=>norm(r)===norm("Allée des Tilleuls"))) t101.splice(Math.max(0,t101.indexOf("Rue des Tilleuls")+1),0,"Allée des Tilleuls");
+  for(const t in S.rues) S.rues[t] = S.rues[t].map(r=>norm(r)===norm("Rue des Chardonnets")?"Rue du Chardonneret":r);
+  S.migr2 = true;
+}
 let IDX = indexRues();
 
 /* Retrouve la ou les tournées d'une adresse géocodée */
@@ -355,9 +368,23 @@ const horsSecteur = c => !CODES_POSTAUX.some(cp => (c.label||"").includes(cp));
 
 /* Ajoute un colis à partir d'une saisie libre */
 const aNumero = s => /^\d/.test((s||"").trim());
+/* Clé d'une saisie sans les mots de liaison : "25 rue Mansart" = "25 Mansart" */
+const MOTS_VIDES = new Set(["rue","r","avenue","av","allee","impasse","imp","place","pl","chemin","boulevard","bd","residence","res","de","des","du","la","le","l","d"]);
+const cleCorr = s => norm(s).split(" ").filter(w=>w && !MOTS_VIDES.has(w)).join(" ");
+/* Adresses que le service ne connaît pas sous leur nom : on cherche autre chose à la place */
+const ALIAS = { "25 mansart":"Résidence Mansart", "27 mansart":"Résidence Mansart" };
 async function trouverAdresse(saisie){
   saisie = saisie.trim();
   if(!aNumero(saisie)) throw new Error("Numéro obligatoire");
+  // 1) position corrigée à la main sur la carte
+  const corr = S.corrections[cleCorr(saisie)];
+  if(corr) return { id:uid(), saisie, label:corr.label, lat:corr.lat, lon:corr.lon, cle:norm(corr.label), score:1, precis:true, corrige:true, tournees:corr.tournees||[] };
+  // 2) alias connus
+  const alias = ALIAS[cleCorr(saisie)];
+  if(alias){
+    try{ const r = await geocode(alias); if(r.length){ const a=r[0], lbl=saisie.match(/^\S+/)[0]+" "+alias+" "+(a.cp||"")+" "+(a.ville||"");
+      return { id:uid(), saisie, label:lbl, lat:a.lat, lon:a.lon, cle:norm(lbl), score:a.score, precis:true, tournees:tourneesDe("Mansart") }; } }catch(e){}
+  }
   let res = await geocode(saisie, {type:"housenumber"});
   if(!res.length) res = await geocode(saisie);
   if(!res.length) throw new Error("Introuvable à Chambray ou Saint-Avertin : "+saisie);
@@ -676,6 +703,7 @@ function initCarte(){
   map = L.map("map",{zoomControl:false}).setView([CENTRE.lat,CENTRE.lon],14);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
   coucheRoute = L.layerGroup().addTo(map); coucheMk = L.layerGroup().addTo(map);
+  map.on("click", e=>{ if(pick) poserCorrection(e.latlng); });
   if(navigator.geolocation){
     watchId = navigator.geolocation.watchPosition(p=>{
       const ll=[p.coords.latitude,p.coords.longitude];
@@ -741,14 +769,104 @@ function formAdresse(titre, valider){
   num.focus();
 }
 
+/* ---------- Annuler (pile des dernières actions, sur ce téléphone pendant la session) ---------- */
+const pile = [];
+function memo(){
+  const k = idxLivre();
+  pile.push({k, arrets: JSON.stringify(S.charges[k].plan.arrets), colis: JSON.stringify(S.charges[k].colis), choix: S.livChoix});
+  if(pile.length>30) pile.shift();
+}
+function annuler(){
+  const m = pile.pop(); if(!m) return;
+  S.charges[m.k].plan.arrets = JSON.parse(m.arrets); S.charges[m.k].colis = JSON.parse(m.colis); S.livChoix = m.choix;
+  vert=null; sauver(); rendreLivrer();
+}
+
+/* ---------- Réordonner les arrêts restants (les numéros écrits sur les colis ne changent pas) ---------- */
+function decouper(){
+  const ar=S.lplan.arrets;
+  return { faits: ar.filter(a=>a.fait), reste: ar.filter(a=>!a.fait && a.type!=="retour"), retour: ar.filter(a=>a.type==="retour" && !a.fait) };
+}
+function recoller(d){ S.lplan.arrets = d.faits.concat(d.reste, d.retour); vert=null; sauver(); rendreLivrer(); }
+function inverser(){
+  const p=$("panel"), d=decouper();
+  p.hidden=false; p.dataset.mode="info";
+  p.innerHTML=`<div class="stack"><strong>Faire les ${d.reste.length} arrêts restants à l'envers ?</strong><div class="sub">Le dernier devient le prochain. Les numéros sur les colis ne changent pas.</div>
+    <div class="row"><button class="btn primary" id="inv-ok" type="button" style="flex:1">Inverser</button><button class="btn" id="inv-no" type="button">Non</button></div></div>`;
+  $("inv-no").onclick=()=>{ p.hidden=true; p.innerHTML=""; };
+  $("inv-ok").onclick=()=>{ memo(); d.reste.reverse(); recoller(d); };
+}
+
+/* ---------- Menu d'un arrêt (liste ou carte) ---------- */
+function menuArret(a){
+  const p=$("panel"); if(!p || a.type==="retour") return;
+  p.hidden=false; p.dataset.mode="menu";
+  const d=decouper(), i=d.reste.indexOf(a);
+  p.innerHTML=`<div class="stack"><strong>N° ${a.rang} · ${esc(court(a.label))}</strong>
+    <div class="sub">${a.type==="fixe"?"point fixe":a.n+" colis"}${a.fait?" · livré":""}</div>
+    <div class="grid2">
+      ${a.fait? `<button class="btn" id="m-redo" type="button">Remettre à livrer</button>` : `<button class="btn primary" id="m-go" type="button" ${i===0?"disabled":""}>Y aller maintenant</button>`}
+      <button class="btn" id="m-corr" type="button">Corriger sur la carte</button>
+      ${a.fait?"":`<button class="btn" id="m-up" type="button" ${i<=0?"disabled":""}>▲ Monter</button>
+      <button class="btn" id="m-down" type="button" ${i===d.reste.length-1?"disabled":""}>▼ Descendre</button>`}
+      <button class="btn" id="m-del" type="button" style="color:var(--bad)">Supprimer</button>
+      <button class="btn" id="m-x" type="button">Fermer</button>
+    </div></div>`;
+  $("m-x").onclick=()=>{ p.hidden=true; p.innerHTML=""; };
+  const bouge=(f)=>{ memo(); const dd=decouper(), j=dd.reste.indexOf(a); f(dd,j); recoller(dd); };
+  if($("m-go")) $("m-go").onclick=()=>bouge((dd,j)=>{ dd.reste.splice(j,1); dd.reste.unshift(a); });
+  if($("m-up")) $("m-up").onclick=()=>bouge((dd,j)=>{ dd.reste.splice(j,1); dd.reste.splice(j-1,0,a); });
+  if($("m-down")) $("m-down").onclick=()=>bouge((dd,j)=>{ dd.reste.splice(j,1); dd.reste.splice(j+1,0,a); });
+  if($("m-redo")) $("m-redo").onclick=()=>{ memo(); a.fait=false; delete a.t; const dd=decouper(); dd.reste.splice(dd.reste.indexOf(a),1); dd.reste.unshift(a); recoller(dd); };
+  $("m-corr").onclick=()=>commencerCorrection(a);
+  $("m-del").onclick=()=>{
+    p.innerHTML=`<div class="stack"><strong>Supprimer le n° ${a.rang} (${esc(court(a.label))}) de la tournée ?</strong>
+      <div class="row"><button class="btn" id="d-ok" type="button" style="flex:1;background:var(--bad);color:#fff">Supprimer</button><button class="btn" id="d-no" type="button">Non</button></div></div>`;
+    $("d-no").onclick=()=>menuArret(a);
+    $("d-ok").onclick=()=>{ memo(); const cle=a.cle||norm(a.label);
+      S.lplan.arrets.splice(S.lplan.arrets.indexOf(a),1);
+      if(a.type==="colis"){ const ch=S.charges[idxLivre()]; ch.colis = ch.colis.filter(k=>k.cle!==cle); }
+      vert=null; sauver(); rendreLivrer(); };
+  };
+}
+
+/* ---------- Corriger la position d'un arrêt en touchant la carte ---------- */
+let pick = null;
+function commencerCorrection(a){
+  const p=$("panel"); pick = a;
+  p.hidden=false; p.dataset.mode="pick";
+  p.innerHTML=`<div class="stack"><strong>Touche la carte à l'endroit exact du n° ${a.rang}.</strong>
+    <input id="pk-nom" type="text" placeholder="Nom affiché (facultatif, ex. 25 Résidence Mansart)">
+    <button class="btn" id="pk-no" type="button">Annuler</button></div>`;
+  $("pk-no").onclick=()=>{ pick=null; p.hidden=true; p.innerHTML=""; };
+  if(!suivre) map.setView([a.lat,a.lon], Math.max(map.getZoom(),17));
+}
+function poserCorrection(ll){
+  const a = pick; pick = null; if(!a) return;
+  memo();
+  const nom = ($("pk-nom") && $("pk-nom").value.trim()) || "";
+  const ancienne = a.cle || norm(a.label);
+  const label = nom ? nom+" "+(a.label.match(/\d{5}.*$/)||[""])[0] : a.label;
+  const ch = S.charges[idxLivre()];
+  const saisies = ch.colis.filter(k=>k.cle===ancienne);
+  saisies.forEach(k=>{
+    S.corrections[cleCorr(k.saisie)] = {label, lat:ll.lat, lon:ll.lng, tournees:k.tournees};
+    Object.assign(k,{label, lat:ll.lat, lon:ll.lng, cle:norm(label), precis:true});
+  });
+  Object.assign(a,{label, lat:ll.lat, lon:ll.lng, cle:norm(label)});
+  vert=null; sauver(); rendreLivrer();
+  setTimeout(()=>infoPanel(saisies.length ? "Position enregistrée. Les prochaines saisies de cette adresse iront ici." : "Position corrigée pour aujourd'hui."),50);
+}
+
 /* Liste des prochains arrêts */
 function listeProchains(){
   const p = $("panel");
   if(!p.hidden && p.dataset.mode==="liste"){ p.hidden=true; p.innerHTML=""; return; }
   p.dataset.mode="liste"; p.hidden=false;
   const reste = S.lplan.arrets.filter(a=>!a.fait);
-  p.innerHTML = `<ul class="list">${reste.slice(0,15).map(a=>`<li><span class="num">${a.rang}</span><div class="main"><div>${esc(a.label.replace(/\s\d{5}\s.*$/,""))}</div><div class="sub">${a.type==="retour"?"dernier arrêt":a.type==="fixe"?"point fixe":a.n+" colis"}</div></div></li>`).join("")}</ul>`
+  p.innerHTML = `<div class="sub">Touche un arrêt pour le déplacer, le corriger ou le supprimer.</div><ul class="list">${reste.slice(0,15).map((a,i)=>`<li data-i="${i}" style="cursor:pointer"><span class="num">${a.rang}</span><div class="main"><div>${esc(a.label.replace(/\s\d{5}\s.*$/,""))}</div><div class="sub">${a.type==="retour"?"dernier arrêt":a.type==="fixe"?"point fixe":a.n+" colis"}</div></div></li>`).join("")}</ul>`
     + (reste.length>15?`<div class="sub">+ ${reste.length-15} autres arrêts</div>`:"");
+  p.querySelectorAll("li[data-i]").forEach(li=>li.onclick=()=>menuArret(reste[+li.dataset.i]));
 }
 
 function rendreLivrer(){
@@ -757,17 +875,21 @@ function rendreLivrer(){
   coucheRoute.clearLayers(); coucheMk.clearLayers();
   if(!S.lplan){ card.innerHTML='<div class="sub">Aucune tournée calculée.</div>'; if(coucheVert) coucheVert.clearLayers(); return; }
   const c = courant(), faits = S.lplan.arrets.filter(a=>a.fait).length, tot = S.lplan.arrets.length;
+  const avecPlan = S.charges.map((ch,k)=>({ch,k})).filter(x=>x.ch.plan);
+  const chips = avecPlan.length>1 ? `<div class="sugg">${avecPlan.map(({ch,k})=>{ const r=ch.plan.arrets.filter(a=>!a.fait && a.type!=="retour").length;
+      return `<button class="chip${k===idxLivre()?" on":""}" type="button" data-ch="${k}">Ch. ${k+1} <small>${r?r+" restants":"fini"}</small></button>`; }).join("")}</div>` : "";
+  const bAnnuler = pile.length ? `<button class="btn small" id="b-undo" type="button">↶ Annuler</button>` : "";
   if(c && c.type==="retour"){
-    card.innerHTML = `<div class="sub">Dernier arrêt · ${faits} / ${tot-1} faits</div>
+    card.innerHTML = chips+`<div class="sub">Dernier arrêt · ${faits} / ${tot-1} faits</div>
       <div class="addr">Retour au dépôt</div>
       <div class="sub">${esc(S.depot ? S.depot.label : "")}</div>
       <button class="btn ok big" id="b-ok" type="button">Arrivé au dépôt</button>
-      <div class="row" style="flex-wrap:wrap"><button class="btn small" id="b-add" type="button">+ Colis</button></div>
+      <div class="row" style="flex-wrap:wrap"><button class="btn small" id="b-add" type="button">+ Colis</button>${bAnnuler}</div>
       <div id="panel" hidden style="max-height:42vh;overflow:auto"></div>`;
-    $("b-ok").onclick = ()=>{ c.fait=true; c.t=Date.now(); sauver(); rendreLivrer(); };
+    $("b-ok").onclick = ()=>{ memo(); c.fait=true; c.t=Date.now(); sauver(); rendreLivrer(); };
   } else if(c){
     const suiv = S.lplan.arrets.filter(a=>!a.fait)[1];
-    card.innerHTML = `<div class="sub">${S.charges.length>1?"Chargement "+(idxLivre()+1)+" · ":""}N° ${c.rang} · arrêt ${faits+1} / ${tot}</div>
+    card.innerHTML = chips+`<div class="sub">${S.charges.length>1?"Chargement "+(idxLivre()+1)+" · ":""}N° ${c.rang} · arrêt ${faits+1} / ${tot}</div>
       <div class="addr">${esc(c.label)}</div>
       <div class="sub">${c.type==="fixe"?"Point fixe":c.n+" colis"}${suiv?" · ensuite : n° "+suiv.rang+", "+esc(suiv.label.replace(/\s\d{5}\s.*$/,"")):""}</div>
       <div class="grid2"><button class="btn ok big" id="b-ok" type="button">Livré</button><button class="btn big" id="b-skip" type="button">Passer</button></div>
@@ -775,19 +897,25 @@ function rendreLivrer(){
         <button class="btn small" id="b-next" type="button">Prochains colis</button>
         <button class="btn small" id="b-edit" type="button">Modifier l'adresse</button>
         <button class="btn small" id="b-add" type="button">+ Colis</button>
+        <button class="btn small" id="b-inv" type="button">⇅ À l'envers</button>
+        ${bAnnuler}
       </div>
       <div id="panel" hidden style="max-height:42vh;overflow:auto"></div>`;
     $("b-ok").onclick = ()=>{
-      const k=idxLivre(); c.fait=true; c.t=Date.now(); sauver();
+      memo();
+      const k=idxLivre(); c.fait=true; c.t=Date.now();
+      if(!S.charges[k].plan.arrets.some(a=>!a.fait)) S.livChoix=null;   // chargement fini : on repasse en automatique
+      sauver();
       const suite = idxLivre()!==k;   // chargement terminé, on passe au suivant
       vert=null; rendreLivrer();
       if(suite) setTimeout(()=>infoPanel("Chargement "+(k+1)+" terminé. Place au chargement "+(idxLivre()+1)+"."),50);
     };
     $("b-skip").onclick = ()=>{   // repoussé en fin de tournée, juste avant le retour au dépôt
-      const i=S.lplan.arrets.indexOf(c); S.lplan.arrets.splice(i,1);
+      memo(); const i=S.lplan.arrets.indexOf(c); S.lplan.arrets.splice(i,1);
       const r=S.lplan.arrets.findIndex(x=>x.type==="retour");
       S.lplan.arrets.splice(r<0?S.lplan.arrets.length:r,0,c); sauver(); rendreLivrer(); };
     $("b-next").onclick = listeProchains;
+    $("b-inv").onclick = inverser;
     $("b-edit").onclick = ()=>{ $("panel").dataset.mode="form"; formAdresse("Corriger : "+c.label, async a=>{
       const ancienne = c.cle || norm(c.label);
       S.lcolis.forEach(k=>{ if(k.cle===ancienne) Object.assign(k,{label:a.label,lat:a.lat,lon:a.lon,cle:a.cle,precis:a.precis,saisie:a.saisie,tournees:a.tournees}); });
@@ -796,8 +924,11 @@ function rendreLivrer(){
     }); };
   } else {
     const nbA = S.charges.reduce((s,ch)=>s+(ch.plan?ch.plan.arrets.filter(a=>a.type!=="retour").length:0),0);
-    card.innerHTML = `<div class="addr">Tournée terminée</div><div class="sub">${nbA} arrêts livrés${S.charges.length>1?" sur "+S.charges.length+" chargements":""}.</div>`;
+    card.innerHTML = chips+`<div class="addr">${avecPlan.length>1?"Chargement "+(idxLivre()+1)+" terminé":"Tournée terminée"}</div><div class="sub">${nbA} arrêts sur la journée${S.charges.length>1?", "+S.charges.length+" chargements":""}.</div>
+      <div class="row">${bAnnuler}</div><div id="panel" hidden style="max-height:42vh;overflow:auto"></div>`;
   }
+  card.querySelectorAll("[data-ch]").forEach(b=>b.onclick=()=>{ S.livChoix=+b.dataset.ch; vert=null; sauver(); rendreLivrer(); });
+  if($("b-undo")) $("b-undo").onclick = annuler;
   if(c && $("b-add")){
     $("b-add").onclick = ()=>{ $("panel").dataset.mode="form"; formAdresse("Ajouter un colis", async a=>{
       S.lcolis.push(a);
@@ -833,7 +964,7 @@ function rendreLivrer(){
     const cls = (a.type==="retour"?"dep ":"")+(a.fait?"done":(a===c?"cur":""));
     const sz = a===c?36:28;
     L.marker([a.lat,a.lon],{icon:L.divIcon({className:"",html:`<div class="mk ${cls}">${a.rang}</div>`,iconSize:[sz,sz]}),zIndexOffset:a===c?500:0})
-      .bindPopup("N° "+a.rang+"<br>"+esc(a.label)+(a.n>1?"<br>"+a.n+" colis":"")).addTo(coucheMk);
+      .on("click", ()=>menuArret(a)).addTo(coucheMk);
   }
   if(c && !suivre) map.setView([c.lat,c.lon], Math.max(map.getZoom(),16));
 }
@@ -888,7 +1019,20 @@ $("b-save-rues").onclick = ()=>{
   IDX = indexRues(); S.charges.flatMap(ch=>ch.colis).forEach(c=>{ c.tournees = tourneesDe(c.label.replace(/^\S+\s/,"").split(/\s\d{5}/)[0]); });
   sauver(); statut($("st-rues"),"Rues enregistrées.");
 };
+function rendreCorrections(){
+  const ul=$("l-corr"); ul.innerHTML="";
+  const e=Object.entries(S.corrections);
+  if(!e.length){ ul.innerHTML='<li class="sub">Aucune correction.</li>'; return; }
+  e.forEach(([k,v])=>{
+    const li=document.createElement("li");
+    li.innerHTML=`<div class="main"><div>${esc(v.label)}</div><div class="sub">saisie : ${esc(k)}</div></div>`;
+    const x=document.createElement("button"); x.className="x"; x.type="button"; x.textContent="✕"; x.setAttribute("aria-label","Supprimer la correction");
+    x.onclick=()=>{ delete S.corrections[k]; sauver(); rendreCorrections(); };
+    li.appendChild(x); ul.appendChild(li);
+  });
+}
 function rendreReglages(){
+  rendreCorrections();
   $("dep-cur").textContent = S.depot ? "Dépôt : "+S.depot.label : "Aucun dépôt renseigné.";
   $("dep-ret").checked = S.retour; $("dep-gps").checked = S.departGPS;
   const ul = $("l-fixes"); ul.innerHTML="";
