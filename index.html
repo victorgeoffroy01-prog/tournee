@@ -182,7 +182,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.8</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.9</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -358,8 +358,9 @@ async function requeteGeo(q, opts, cp){
 /* Recherche limitée au secteur : une requête par code postal, résultats fusionnés.
    opts.secours = true : si rien sur le secteur, on cherche partout (dépôt, points fixes). */
 async function geocode(q, opts={}){
-  const lots = await Promise.all(CODES_POSTAUX.map(cp => requeteGeo(q, opts, cp)));
-  let res = lots.flat().filter(a => CODES_POSTAUX.includes(a.cp));   // double contrôle
+  const cps = opts.cps || CODES_POSTAUX;
+  const lots = await Promise.all(cps.map(cp => requeteGeo(q, opts, cp)));
+  let res = lots.flat().filter(a => cps.includes(a.cp));   // double contrôle
   res.sort((a,b)=> b.score - a.score);
   if(!res.length && opts.secours) res = await requeteGeo(q, opts, null);
   return res.slice(0, opts.limit||1);
@@ -372,6 +373,13 @@ const aNumero = s => /^\d/.test((s||"").trim());
 const MOTS_VIDES = new Set(["rue","r","avenue","av","allee","impasse","imp","place","pl","chemin","boulevard","bd","residence","res","de","des","du","la","le","l","d"]);
 const cleCorr = s => norm(s).split(" ").filter(w=>w && !MOTS_VIDES.has(w)).join(" ");
 /* Adresses que le service ne connaît pas sous leur nom : on cherche autre chose à la place */
+/* Rues qui existent dans les deux communes : celle du secteur (37170 Chambray, 37550 Saint-Avertin) */
+const COMMUNE_RUE = { "tamaris":"37170" };
+function cpsDe(saisie){
+  const mots = " "+cleCorr(saisie)+" ";
+  for(const [rue,cp] of Object.entries(COMMUNE_RUE)) if(mots.includes(" "+rue+" ")) return [cp];
+  return null;
+}
 const ALIAS = { "25 mansart":"Résidence Mansart", "27 mansart":"Résidence Mansart" };
 async function trouverAdresse(saisie){
   saisie = saisie.trim();
@@ -385,8 +393,9 @@ async function trouverAdresse(saisie){
     try{ const r = await geocode(alias); if(r.length){ const a=r[0], lbl=saisie.match(/^\S+/)[0]+" "+alias+" "+(a.cp||"")+" "+(a.ville||"");
       return { id:uid(), saisie, label:lbl, lat:a.lat, lon:a.lon, cle:norm(lbl), score:a.score, precis:true, tournees:tourneesDe("Mansart") }; } }catch(e){}
   }
-  let res = await geocode(saisie, {type:"housenumber"});
-  if(!res.length) res = await geocode(saisie);
+  const cps = cpsDe(saisie);
+  let res = await geocode(saisie, {type:"housenumber", cps});
+  if(!res.length) res = await geocode(saisie, {cps});
   if(!res.length) throw new Error("Introuvable à Chambray ou Saint-Avertin : "+saisie);
   const a = res[0];
   return { id:uid(), saisie, label:a.label, lat:a.lat, lon:a.lon,
