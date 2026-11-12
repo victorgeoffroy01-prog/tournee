@@ -182,7 +182,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.9</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.10</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -340,19 +340,47 @@ function tourneesDe(rueBAN){
    GÉOCODAGE (Base Adresse Nationale via IGN)
    ===================================================================== */
 /* Une requête brute à l'API, éventuellement filtrée sur un code postal */
-async function requeteGeo(q, opts, cp){
+/* Services d'adresses, essayés dans l'ordre. Si l'un tombe en panne (erreur 5xx, délai),
+   on passe au suivant et on l'évite pendant 5 minutes. */
+const VILLE_CP = { "37170":"Chambray-lès-Tours", "37550":"Saint-Avertin" };
+const delai = ms => ({signal: AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined});
+const banVersObjets = j => (j.features||[]).map(f=>({
+  label: f.properties.label, score: f.properties.score, cp: f.properties.postcode,
+  type: f.properties.type, rue: f.properties.street || f.properties.name,
+  ville: f.properties.city, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1]
+}));
+function paramsBAN(q, opts, cp){
   const p = new URLSearchParams({q, limit: Math.max(opts.limit||1, 5), lat:CENTRE.lat, lon:CENTRE.lon});
   if(cp) p.set("postcode", cp);
   if(opts.type) p.set("type",opts.type);
   if(opts.auto) p.set("autocomplete","1");
-  const r = await fetch(GEO_URL+"?"+p, {signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined});
-  if(!r.ok) throw new Error("Géocodage indisponible ("+r.status+")");
-  const j = await r.json();
-  return (j.features||[]).map(f=>({
-    label: f.properties.label, score: f.properties.score, cp: f.properties.postcode,
-    type: f.properties.type, rue: f.properties.street || f.properties.name,
-    ville: f.properties.city, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1]
-  }));
+  return p;
+}
+const SERVICES = [
+  { nom:"IGN", go: async (q,opts,cp)=>{ const r=await fetch(GEO_URL+"?"+paramsBAN(q,opts,cp), delai(6000)); if(!r.ok) throw r.status; return banVersObjets(await r.json()); } },
+  { nom:"BAN", go: async (q,opts,cp)=>{ const r=await fetch("https://api-adresse.data.gouv.fr/search/?"+paramsBAN(q,opts,cp), delai(6000)); if(!r.ok) throw r.status; return banVersObjets(await r.json()); } },
+  { nom:"Photon", go: async (q,opts,cp)=>{   // OpenStreetMap, pas de filtre code postal : on filtre après
+      const p = new URLSearchParams({q: q+(cp?", "+VILLE_CP[cp]:""), lat:CENTRE.lat, lon:CENTRE.lon, limit:10});
+      const r=await fetch("https://photon.komoot.io/api/?"+p, delai(6000)); if(!r.ok) throw r.status;
+      const j=await r.json();
+      return (j.features||[]).map(f=>{ const pr=f.properties, rue=pr.street||pr.name||"";
+        const label=[pr.housenumber, rue].filter(Boolean).join(" ")+" "+(pr.postcode||"")+" "+(pr.city||"");
+        return { label:label.replace(/\s+/g," ").trim(), score:.7, cp:pr.postcode, type: pr.housenumber?"housenumber":"street",
+                 rue, ville:pr.city, lon:f.geometry.coordinates[0], lat:f.geometry.coordinates[1] }; })
+        .filter(a=>!cp || a.cp===cp);
+  } }
+];
+const enPanne = {};   // nom -> heure de la panne
+async function requeteGeo(q, opts, cp){
+  let derniere;
+  for(const s of SERVICES){
+    if(enPanne[s.nom] && Date.now()-enPanne[s.nom] < 5*60000) continue;
+    try{ return await s.go(q, opts, cp); }
+    catch(e){ derniere=e; if(typeof e!=="number" || e>=500 || e===429) enPanne[s.nom]=Date.now(); else throw new Error("Recherche refusée ("+e+")"); }
+  }
+  // tous en panne récente : on retente quand même le premier
+  for(const k in enPanne) delete enPanne[k];
+  throw new Error("Services d'adresses indisponibles ("+(derniere||"réseau")+"). Réessaie dans un instant.");
 }
 
 /* Recherche limitée au secteur : une requête par code postal, résultats fusionnés.
