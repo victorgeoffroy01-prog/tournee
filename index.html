@@ -182,7 +182,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.10</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.11</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -393,7 +393,7 @@ async function geocode(q, opts={}){
   if(!res.length && opts.secours) res = await requeteGeo(q, opts, null);
   return res.slice(0, opts.limit||1);
 }
-const horsSecteur = c => !CODES_POSTAUX.some(cp => (c.label||"").includes(cp));
+const horsSecteur = c => !c.introuvable && !CODES_POSTAUX.some(cp => (c.label||"").includes(cp));
 
 /* Ajoute un colis à partir d'une saisie libre */
 const aNumero = s => /^\d/.test((s||"").trim());
@@ -402,7 +402,7 @@ const MOTS_VIDES = new Set(["rue","r","avenue","av","allee","impasse","imp","pla
 const cleCorr = s => norm(s).split(" ").filter(w=>w && !MOTS_VIDES.has(w)).join(" ");
 /* Adresses que le service ne connaît pas sous leur nom : on cherche autre chose à la place */
 /* Rues qui existent dans les deux communes : celle du secteur (37170 Chambray, 37550 Saint-Avertin) */
-const COMMUNE_RUE = { "tamaris":"37170" };
+const COMMUNE_RUE = { "tamaris":"37170", "vignes":"37170" };
 function cpsDe(saisie){
   const mots = " "+cleCorr(saisie)+" ";
   for(const [rue,cp] of Object.entries(COMMUNE_RUE)) if(mots.includes(" "+rue+" ")) return [cp];
@@ -421,14 +421,28 @@ async function trouverAdresse(saisie){
     try{ const r = await geocode(alias); if(r.length){ const a=r[0], lbl=saisie.match(/^\S+/)[0]+" "+alias+" "+(a.cp||"")+" "+(a.ville||"");
       return { id:uid(), saisie, label:lbl, lat:a.lat, lon:a.lon, cle:norm(lbl), score:a.score, precis:true, tournees:tourneesDe("Mansart") }; } }catch(e){}
   }
+  // 3) recherche : on n'accepte que le bon numéro dans la bonne rue, sinon le colis reste "introuvable"
   const cps = cpsDe(saisie);
-  let res = await geocode(saisie, {type:"housenumber", cps});
-  if(!res.length) res = await geocode(saisie, {cps});
-  if(!res.length) throw new Error("Introuvable à Chambray ou Saint-Avertin : "+saisie);
-  const a = res[0];
+  const res = await geocode(saisie, {type:"housenumber", cps, limit:5});
+  const a = res.find(r => correspond(saisie, r));
+  if(!a) return colisIntrouvable(saisie);
   return { id:uid(), saisie, label:a.label, lat:a.lat, lon:a.lon,
-           cle: norm(a.label), score:a.score, precis: a.type==="housenumber",
+           cle: norm(a.label), score:a.score, precis:true,
            tournees: tourneesDe(a.rue||"") };
+}
+/* Le résultat a-t-il le numéro et la rue tapés ? */
+function correspond(saisie, r){
+  if(!r || r.type!=="housenumber") return false;
+  const numTape = (saisie.match(/^\d+/)||[""])[0], numTrouve = ((r.label||"").match(/^\d+/)||[""])[0];
+  if(!numTape || numTape!==numTrouve) return false;
+  const motsRue = cleCorr(saisie.replace(/^\S+\s*/,"")).split(" ").filter(w=>w.length>1 && !/^(bis|ter|quater)$/.test(w));
+  const motsTrouves = cleCorr(r.rue||r.label).split(" ");
+  return motsRue.length>0 && motsRue.every(w => motsTrouves.some(t => t.startsWith(w)));
+}
+/* Colis gardé tel que tapé, sans position : il passera en dernier */
+function colisIntrouvable(saisie){
+  return { id:uid(), saisie, label:saisie, lat:null, lon:null, cle:"x:"+norm(saisie), score:0,
+           precis:false, introuvable:true, tournees: tourneesDe(saisie.replace(/^\S+\s*/,"")) };
 }
 async function ajouterColis(saisie){
   const c = await trouverAdresse(saisie);
@@ -463,7 +477,7 @@ async function envoyer(){
   statut(st,"Recherche…");
   try{
     const c = await ajouterColis(n+" "+r);
-    statut(st, "✓ "+c.label + (c.precis?"":" (numéro non trouvé, vérifie)"), !c.precis);
+    statut(st, c.introuvable ? "Pas trouvé : « "+c.saisie+" » est gardé tel quel et passera en dernier." : "✓ "+c.label, !!c.introuvable);
     fNum.value=""; fRue.value=""; $("sugg").innerHTML=""; fNum.focus();   // tout s'efface, prêt pour le suivant
     rendreColis();
   }catch(e){ statut(st,e.message,true); }
@@ -505,7 +519,7 @@ function rendreColis(){
   [...S.colis].reverse().forEach(c=>{
     const li = document.createElement("li");
     const tags = (c.tournees.length? c.tournees.map(t=>`<span class="tag">${t}</span>`).join("") : '<span class="tag">hors liste</span>')
-               + (c.precis? "" : '<span class="tag warn">à vérifier</span>')
+               + (c.introuvable? '<span class="tag warn">introuvable · en dernier</span>' : "")
                + (horsSecteur(c)? '<span class="tag bad">hors secteur, à supprimer</span>' : "");
     li.innerHTML = `<div class="main"><div>${esc(c.label)}</div><div class="sub">${tags}saisi : ${esc(c.saisie)}</div></div>`;
     const x = document.createElement("button"); x.className="x"; x.type="button"; x.textContent="✕"; x.setAttribute("aria-label","Supprimer");
@@ -557,7 +571,7 @@ function grouper(){ return grouperDe(S.colis, S.edit===0); }
 function grouperDe(colis, avecFixes){
   const m = new Map();
   for(const c of colis){
-    if(!m.has(c.cle)) m.set(c.cle,{type:"colis", label:c.label, lat:c.lat, lon:c.lon, n:0, tournees:c.tournees, precis:c.precis});
+    if(!m.has(c.cle)) m.set(c.cle,{type:"colis", label:c.label, lat:c.lat, lon:c.lon, cle:c.cle, n:0, tournees:c.tournees, precis:c.precis, introuvable:!!c.introuvable});
     m.get(c.cle).n++;
   }
   const arrets = [...m.values()];
@@ -663,11 +677,12 @@ async function calculer(depuisGPS, arretsSource, cible){
   const st = $("st-opt"), btn = $("b-opt");
   if(cible==null) cible = S.edit;
   const ch = S.charges[cible];
-  const arrets = (arretsSource || grouper()).filter(a=>a.type!=="retour");
-  if(!arrets.length){ statut(st,"Ajoute des colis d'abord.",true); return; }
+  const tous = (arretsSource || grouper()).filter(a=>a.type!=="retour");
+  if(!tous.length){ statut(st,"Ajoute des colis d'abord.",true); return; }
+  const arrets = tous.filter(a=>a.lat!=null), introuv = tous.filter(a=>a.lat==null);   // sans position : en dernier
   // fin du chargement précédent (dernier arrêt hors retour) = point de départ de celui-ci
   const prec = cible>0 ? S.charges[cible-1].plan : null;
-  const finPrec = prec ? [...prec.arrets].reverse().find(a=>a.type!=="retour") : null;
+  const finPrec = prec ? [...prec.arrets].reverse().find(a=>a.type!=="retour" && a.lat!=null) : null;
   let dep;
   if(depuisGPS || S.departGPS){ try{ statut(st,"Localisation…"); const p = await maPosition(); dep = {type:"depot",label:"Ma position",...p}; }catch(e){ statut(st,e.message,true); return; } }
   else if(finPrec){ dep = {type:"depot", label:"Fin du chargement "+cible, lat:finPrec.lat, lon:finPrec.lon, horsDepot:true}; }
@@ -683,7 +698,7 @@ async function calculer(depuisGPS, arretsSource, cible){
     statut(st,"Optimisation…");
     await new Promise(r=>setTimeout(r,20));
     const fin = depotSep ? pts.length-1 : null;
-    const {tour} = optimiser(D, 0, retour && !depotSep, 4000, fin);
+    const {tour} = pts.length>1 ? optimiser(D, 0, retour && !depotSep, 4000, fin) : {tour:[]};
     const ordre = tour.map(i=>pts[i]);
     statut(st,"Tracé…");
     const arrivee = depotSep ? pts[fin] : dep;
@@ -691,12 +706,15 @@ async function calculer(depuisGPS, arretsSource, cible){
     const {geom, legs} = await trace(chemin);
     const km = legs.reduce((a,l)=>a+l.m,0)/1000, min = legs.reduce((a,l)=>a+l.s,0)/60;
     const liste = ordre.map((a,i)=>({...a, rang: a.rang ?? i+1, fait:false, leg:legs[i]}));
+    // introuvables : à la fin, numéros à la suite
+    let rmax = Math.max(0, ...liste.map(a=>+a.rang||0), ...introuv.map(a=>+a.rang||0));
+    introuv.forEach(a=>liste.push({...a, rang: a.rang ?? ++rmax, fait:false}));
     if(retour) liste.push({type:"retour", label:"Retour au dépôt · "+S.depot.label, lat:S.depot.lat, lon:S.depot.lon, n:0, tournees:[], precis:true, rang:"D", fait:false, leg:legs[ordre.length]});
     ch.plan = { depart:dep, retour, arrets: liste, geom, km, min, secours };
     // les chargements précédents ne reviennent plus au dépôt : on enchaîne
     for(let k=0;k<cible;k++){ const pl=S.charges[k].plan; if(pl) pl.arrets = pl.arrets.filter(a=>a.type!=="retour" || a.fait); }
     sauver();
-    statut(st, `${ordre.length} arrêts${retour?" + retour dépôt":""} · ${km.toFixed(1)} km · ${Math.round(min)} min de route`+(secours?" (estimation, service d'itinéraire injoignable)":""));
+    statut(st, `${ordre.length} arrêts${introuv.length?" + "+introuv.length+" introuvable(s) en dernier":""}${retour?" + retour dépôt":""} · ${km.toFixed(1)} km · ${Math.round(min)} min de route`+(secours?" (estimation, service d'itinéraire injoignable)":""));
     rendreTri();
     return true;
   }catch(e){ statut(st,"Erreur : "+e.message,true); }
@@ -725,7 +743,8 @@ function rendreTri(){
   for(const x of liste){
     const li = document.createElement("li");
     const tags = x.type==="fixe" ? '<span class="tag">point fixe</span>'
-      : (x.tournees.length? x.tournees.map(t=>`<span class="tag">${t}</span>`).join("") : '<span class="tag">hors liste</span>') + (x.n>1?`<span class="tag">${x.n} colis</span>`:"");
+      : (x.introuvable? '<span class="tag warn">introuvable</span>' : "")
+      + (x.tournees.length? x.tournees.map(t=>`<span class="tag">${t}</span>`).join("") : '<span class="tag">hors liste</span>') + (x.n>1?`<span class="tag">${x.n} colis</span>`:"");
     li.innerHTML = `<span class="num">${x.rang}</span><div class="main"><div>${esc(x.label)}</div><div class="sub">${tags}</div></div>`;
     ul.appendChild(li);
   }
@@ -754,10 +773,11 @@ function courant(){ return S.lplan ? S.lplan.arrets.find(a=>!a.fait) : null; }
 /* Tronçon à faire jusqu'au prochain arrêt (vert), recalculé quand l'arrêt change */
 let vert = null;   // {cle, geom}
 async function tronconVert(c){
+  if(c.lat==null){ vert=null; if(coucheVert) coucheVert.clearLayers(); return; }
   const cle = c.lat+","+c.lon;
   if(vert && vert.cle===cle) return;
   vert = {cle, geom:null};
-  const faits = S.lplan.arrets.filter(a=>a.fait);
+  const faits = S.lplan.arrets.filter(a=>a.fait && a.lat!=null);
   const o = mkMoi ? {lat:mkMoi.getLatLng().lat, lon:mkMoi.getLatLng().lng}
           : (faits.length ? faits[faits.length-1] : S.lplan.depart);
   let geom = [[o.lat,o.lon],[c.lat,c.lon]];
@@ -876,7 +896,7 @@ function commencerCorrection(a){
     <input id="pk-nom" type="text" placeholder="Nom affiché (facultatif, ex. 25 Résidence Mansart)">
     <button class="btn" id="pk-no" type="button">Annuler</button></div>`;
   $("pk-no").onclick=()=>{ pick=null; p.hidden=true; p.innerHTML=""; };
-  if(!suivre) map.setView([a.lat,a.lon], Math.max(map.getZoom(),17));
+  if(!suivre && a.lat!=null) map.setView([a.lat,a.lon], Math.max(map.getZoom(),17));
 }
 function poserCorrection(ll){
   const a = pick; pick = null; if(!a) return;
@@ -888,9 +908,9 @@ function poserCorrection(ll){
   const saisies = ch.colis.filter(k=>k.cle===ancienne);
   saisies.forEach(k=>{
     S.corrections[cleCorr(k.saisie)] = {label, lat:ll.lat, lon:ll.lng, tournees:k.tournees};
-    Object.assign(k,{label, lat:ll.lat, lon:ll.lng, cle:norm(label), precis:true});
+    Object.assign(k,{label, lat:ll.lat, lon:ll.lng, cle:norm(label), precis:true, introuvable:false});
   });
-  Object.assign(a,{label, lat:ll.lat, lon:ll.lng, cle:norm(label)});
+  Object.assign(a,{label, lat:ll.lat, lon:ll.lng, cle:norm(label), introuvable:false});
   vert=null; sauver(); rendreLivrer();
   setTimeout(()=>infoPanel(saisies.length ? "Position enregistrée. Les prochaines saisies de cette adresse iront ici." : "Position corrigée pour aujourd'hui."),50);
 }
@@ -928,10 +948,12 @@ function rendreLivrer(){
     const suiv = S.lplan.arrets.filter(a=>!a.fait)[1];
     card.innerHTML = chips+`<div class="sub">${S.charges.length>1?"Chargement "+(idxLivre()+1)+" · ":""}N° ${c.rang} · arrêt ${faits+1} / ${tot}</div>
       <div class="addr">${esc(c.label)}</div>
+      ${c.introuvable?'<div class="sub" style="color:var(--warn)">Adresse non trouvée par l\'appli : cherche-la sur place, puis « Corriger sur la carte » pour la garder.</div>':""}
       <div class="sub">${c.type==="fixe"?"Point fixe":c.n+" colis"}${suiv?" · ensuite : n° "+suiv.rang+", "+esc(suiv.label.replace(/\s\d{5}\s.*$/,"")):""}</div>
       <div class="grid2"><button class="btn ok big" id="b-ok" type="button">Livré</button><button class="btn big" id="b-skip" type="button">Passer</button></div>
       <div class="row" style="flex-wrap:wrap">
         <button class="btn small" id="b-next" type="button">Prochains colis</button>
+        ${c.introuvable?'<button class="btn small primary" id="b-corr" type="button">Corriger sur la carte</button>':""}
         <button class="btn small" id="b-edit" type="button">Modifier l'adresse</button>
         <button class="btn small" id="b-add" type="button">+ Colis</button>
         <button class="btn small" id="b-inv" type="button">⇅ À l'envers</button>
@@ -952,11 +974,12 @@ function rendreLivrer(){
       const r=S.lplan.arrets.findIndex(x=>x.type==="retour");
       S.lplan.arrets.splice(r<0?S.lplan.arrets.length:r,0,c); sauver(); rendreLivrer(); };
     $("b-next").onclick = listeProchains;
+    if($("b-corr")) $("b-corr").onclick = ()=>commencerCorrection(c);
     $("b-inv").onclick = inverser;
     $("b-edit").onclick = ()=>{ $("panel").dataset.mode="form"; formAdresse("Corriger : "+c.label, async a=>{
       const ancienne = c.cle || norm(c.label);
-      S.lcolis.forEach(k=>{ if(k.cle===ancienne) Object.assign(k,{label:a.label,lat:a.lat,lon:a.lon,cle:a.cle,precis:a.precis,saisie:a.saisie,tournees:a.tournees}); });
-      Object.assign(c,{label:a.label,lat:a.lat,lon:a.lon,cle:a.cle,precis:a.precis,tournees:a.tournees});
+      S.lcolis.forEach(k=>{ if(k.cle===ancienne) Object.assign(k,{label:a.label,lat:a.lat,lon:a.lon,cle:a.cle,precis:a.precis,saisie:a.saisie,tournees:a.tournees,introuvable:!!a.introuvable}); });
+      Object.assign(c,{label:a.label,lat:a.lat,lon:a.lon,cle:a.cle,precis:a.precis,tournees:a.tournees,introuvable:!!a.introuvable});
       vert=null; sauver();
     }); };
   } else {
@@ -973,17 +996,19 @@ function rendreLivrer(){
       const retourArr = S.lplan.arrets.find(x=>x.type==="retour" && !x.fait);
       const deja = reste.find(x=>(x.cle||norm(x.label))===a.cle);
       if(deja){ deja.n++; sauver(); return; }
-      // insertion au meilleur endroit parmi les arrêts restants (distance à vol d'oiseau)
-      const fs = S.lplan.arrets.filter(x=>x.fait);
+      // insertion au meilleur endroit parmi les arrêts restants (distance à vol d'oiseau) ; introuvable -> en dernier
+      const fs = S.lplan.arrets.filter(x=>x.fait && x.lat!=null);
       const prev0 = fs.length ? fs[fs.length-1] : S.lplan.depart;
       let best=0, bc=Infinity;
       for(let k=0;k<=reste.length;k++){
         const A = k===0 ? prev0 : reste[k-1], B = reste[k] || retourArr;
+        if(a.lat==null){ best=reste.length; break; }
+        if(A.lat==null || (B && B.lat==null)) continue;
         const cout = vol(A,a) + (B? vol(a,B)-vol(A,B) : 0);
         if(cout<bc){ bc=cout; best=k; }
       }
       const maxRang = Math.max(0,...S.lplan.arrets.map(x=>+x.rang||0));
-      const arret = {type:"colis", label:a.label, lat:a.lat, lon:a.lon, cle:a.cle, n:1, tournees:a.tournees, precis:a.precis, rang:maxRang+1, fait:false};
+      const arret = {type:"colis", label:a.label, lat:a.lat, lon:a.lon, cle:a.cle, n:1, tournees:a.tournees, precis:a.precis, introuvable:!!a.introuvable, rang:maxRang+1, fait:false};
       const pos = best<reste.length ? S.lplan.arrets.indexOf(reste[best]) : (retourArr ? S.lplan.arrets.indexOf(retourArr) : S.lplan.arrets.length);
       S.lplan.arrets.splice(pos,0,arret);
       statut($("st-opt"),"");
@@ -998,12 +1023,13 @@ function rendreLivrer(){
   if(!S.lplan.arrets.some(a=>a.type==="retour"))
     L.marker([d.lat,d.lon],{icon:L.divIcon({className:"",html:'<div class="mk dep">D</div>',iconSize:[28,28]})}).addTo(coucheMk);
   for(const a of S.lplan.arrets){
+    if(a.lat==null) continue;   // introuvable : pas de pastille
     const cls = (a.type==="retour"?"dep ":"")+(a.fait?"done":(a===c?"cur":""));
     const sz = a===c?36:28;
     L.marker([a.lat,a.lon],{icon:L.divIcon({className:"",html:`<div class="mk ${cls}">${a.rang}</div>`,iconSize:[sz,sz]}),zIndexOffset:a===c?500:0})
       .on("click", ()=>menuArret(a)).addTo(coucheMk);
   }
-  if(c && !suivre) map.setView([c.lat,c.lon], Math.max(map.getZoom(),16));
+  if(c && c.lat!=null && !suivre) map.setView([c.lat,c.lon], Math.max(map.getZoom(),16));
 }
 /* Message dans le panneau de la carte (n° à écrire, changement de chargement…) */
 function infoPanel(txt){
