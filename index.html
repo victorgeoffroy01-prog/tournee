@@ -187,7 +187,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.12</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.13</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -261,7 +261,7 @@ const BLOC     = 45;                                           // taille des blo
 /* Rues de départ, d'après les listes de tournées (modifiables dans Réglages) */
 const RUES_INIT = {
   "100": ["Rue de la Mairie","Place du 11 Novembre","Hippodrome","Grandes Maisons","Iris","Tamaris","Muguet","Primevères","Campanules","Jonquilles","Rue des Petits Clos","Pervenches","Cyclamens","Berchottière","Impasse des Clématites","Rue des Millepertuis","Allée des Millepertuis","Mesliers","Impasse des Mesliers","Jasmins","Grenouillère","Rainettes","Charmes","Marnière","Érables","Ornano","Prunus","Forêt","Bad Camberg","Turone","Joué","Nière","Fusains","Plaine","Avenir","Vignes","Petites Maisons","Abricotiers","Pêchers","Groseilliers","Cerisiers","Amandiers","Pommiers","Jean de la Fontaine"],
-  "101": ["Platanes","Rue des Tilleuls","Allée des Tilleuls","Hameau des Tilleuls","Brûlée","8 Mai","Roses","Violettes","Forêt","Buissons","Mésanges","Acacias","Frênes","Allée des Aulnes","Impasse des Aulnes","Bouleaux","Cytises","Suzanne Flon","Place Voru","Roland Pilain","Marie Laurencin","Barbara","Petites Maisons","Samuel Morse","Charles Bourseul","Avenue de la République","Boris Vian","Léonard de Vinci","Charpentier","Pinaigrier","Sicard"],
+  "101": ["Platanes","Rue des Tilleuls","Allée des Tilleuls","Hameau des Tilleuls","Brûlée","8 Mai","Roses","Violettes","Forêt","Buissons","Mésanges","Acacias","Frênes","Allée des Aulnes","Impasse des Aulnes","Bouleaux","Cytises","Suzanne Flon","Place Voru","Rue Rolland-Pilain","Marie Laurencin","Barbara","Petites Maisons","Samuel Morse","Rue Charles Bouseul","Avenue de la République","Boris Vian","Léonard de Vinci","Charpentier","Pinaigrier","Sicard"],
   "107": ["Avenue de la République","Rue de la Cour","Barillerie","Laloux","Mansart","Le Nôtre","Félix Dujardin","Petite Alouette","Avenue du Général de Gaulle","Fleuriau","Rabelais","Honoré de Balzac","Boylesve","Paul-Louis Courier","Anatole France","Ronsard","Impasse Ronsard","Alfred de Vigny","Rosnay","Jules Romains","Archerie","Malarderie","Fosse Primault","Richelieu","Rue de la Branchoire","Avenue de Beaugaillard","Rue du Chardonneret","Avenue de la Branchoire","Roitelets","Horizon Vert","Fauvettes","Rossignols","Bouvreuils"]
 };
 
@@ -344,6 +344,11 @@ if(!S.migr2){   // mise à jour des rues déjà enregistrées sur le téléphone
   const t101 = S.rues["101"]||[]; if(!t101.some(r=>norm(r)===norm("Allée des Tilleuls"))) t101.splice(Math.max(0,t101.indexOf("Rue des Tilleuls")+1),0,"Allée des Tilleuls");
   for(const t in S.rues) S.rues[t] = S.rues[t].map(r=>norm(r)===norm("Rue des Chardonnets")?"Rue du Chardonneret":r);
   S.migr2 = true;
+}
+if(!S.migr3){   // noms officiels : Rolland-Pilain, Bouseul (sinon l'adresse n'est pas reconnue)
+  const fix = {"roland pilain":"Rue Rolland-Pilain","rue roland pilain":"Rue Rolland-Pilain","charles bourseul":"Rue Charles Bouseul","rue charles bourseul":"Rue Charles Bouseul"};
+  for(const t in S.rues) S.rues[t] = S.rues[t].map(r=>fix[norm(r)]||r);
+  S.migr3 = true;
 }
 let IDX = indexRues();
 
@@ -439,7 +444,9 @@ async function trouverAdresse(saisie){
     try{ const r = await geocode(alias); if(r.length){ const a=r[0], lbl=saisie.match(/^\S+/)[0]+" "+alias+" "+(a.cp||"")+" "+(a.ville||"");
       return { id:uid(), saisie, label:lbl, lat:a.lat, lon:a.lon, cle:norm(lbl), score:a.score, precis:true, tournees:tourneesDe("Mansart") }; } }catch(e){}
   }
-  // 3) recherche : on n'accepte que le bon numéro dans la bonne rue, sinon le colis reste "introuvable"
+  // 3) orthographes courantes -> nom officiel
+  saisie = saisie.replace(/\broland[\s-]*pilain\b/i,"Rolland-Pilain").replace(/\bbourseul\b/i,"Bouseul");
+  // 4) recherche : on n'accepte que le bon numéro dans la bonne rue, sinon le colis reste "introuvable"
   const cps = cpsDe(saisie);
   const res = await geocode(saisie, {type:"housenumber", cps, limit:5});
   const a = res.find(r => correspond(saisie, r));
