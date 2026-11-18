@@ -187,7 +187,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.13</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.14</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -638,32 +638,42 @@ async function matrice(pts, onProg){
    plus proche voisin, puis améliorations 2-opt et Or-opt
    ===================================================================== */
 function optimiser(D, depart, retour, budgetMs=4000, fin=null){
-  // fin : index d'un point d'arrivée imposé (ex. dépôt quand on part de sa position GPS)
+  // fin : index d'un point d'arrivée imposé ; retour : boucle vers le départ
   const n = D.length, reste = [...Array(n).keys()].filter(i=>i!==depart && i!==fin);
   if(fin!==null) retour = false;
-  // 1) plus proche voisin
-  let tour=[], cur=depart, libres=new Set(reste);
-  while(libres.size){ let best=null,bd=Infinity; for(const k of libres){ if(D[cur][k]<bd){bd=D[cur][k];best=k;} } tour.push(best); libres.delete(best); cur=best; }
   const cout = t => { let c=D[depart][t[0]]||0; for(let i=1;i<t.length;i++) c+=D[t[i-1]][t[i]]; if(retour&&t.length) c+=D[t[t.length-1]][depart]; if(fin!==null) c+=D[t.length?t[t.length-1]:depart][fin]; return c; };
-  let best = cout(tour); const t0 = performance.now();
-  let mieux = true;
-  while(mieux && performance.now()-t0 < budgetMs){
-    mieux = false;
-    // 2-opt : inverser un segment
-    for(let i=0;i<tour.length-1 && !mieux;i++) for(let j=i+1;j<tour.length;j++){
-      const t = tour.slice(0,i).concat(tour.slice(i,j+1).reverse(), tour.slice(j+1));
-      const c = cout(t); if(c < best-0.5){ tour=t; best=c; mieux=true; break; }
-    }
-    // Or-opt : déplacer un bloc de 1 à 3 arrêts
-    for(let L=1;L<=3 && !mieux;L++) for(let i=0;i+L<=tour.length && !mieux;i++){
-      const seg = tour.slice(i,i+L), sans = tour.slice(0,i).concat(tour.slice(i+L));
-      for(let p=0;p<=sans.length;p++){ if(p===i) continue;
-        const t = sans.slice(0,p).concat(seg, sans.slice(p)); const c = cout(t);
-        if(c < best-0.5){ tour=t; best=c; mieux=true; break; }
+  const t0 = performance.now(), temps = () => performance.now()-t0 < budgetMs;
+  // recherche locale : 2-opt (inverser un segment) + Or-opt (déplacer 1 à 3 arrêts)
+  function ameliorer(tour){
+    let best = cout(tour), mieux = true;
+    while(mieux && temps()){
+      mieux = false;
+      for(let i=0;i<tour.length-1 && !mieux;i++) for(let j=i+1;j<tour.length;j++){
+        const t = tour.slice(0,i).concat(tour.slice(i,j+1).reverse(), tour.slice(j+1));
+        const c = cout(t); if(c < best-0.5){ tour=t; best=c; mieux=true; break; }
+      }
+      for(let L=1;L<=3 && !mieux;L++) for(let i=0;i+L<=tour.length && !mieux;i++){
+        const seg = tour.slice(i,i+L), sans = tour.slice(0,i).concat(tour.slice(i+L));
+        for(let p=0;p<=sans.length;p++){ if(p===i) continue;
+          const t = sans.slice(0,p).concat(seg, sans.slice(p)); const c = cout(t);
+          if(c < best-0.5){ tour=t; best=c; mieux=true; break; }
+        }
       }
     }
+    return {tour, c:best};
   }
-  return {tour, cout:best};
+  // 1) plus proche voisin
+  let tour=[], cur=depart, libres=new Set(reste);
+  while(libres.size){ let b=null,bd=Infinity; for(const k of libres){ if(D[cur][k]<bd){bd=D[cur][k];b=k;} } tour.push(b); libres.delete(b); cur=b; }
+  let meilleur = ameliorer(tour);
+  // 2) tant qu'il reste du temps : on secoue la tournée (double pont) et on réoptimise, on garde la meilleure
+  while(temps() && meilleur.tour.length>7){
+    const t = meilleur.tour, L = t.length;
+    const p1 = 1+Math.floor(Math.random()*(L-3)), p2 = p1+1+Math.floor(Math.random()*(L-p1-2)), p3 = p2+1+Math.floor(Math.random()*(L-p2-1));
+    const essai = ameliorer(t.slice(0,p1).concat(t.slice(p2,p3), t.slice(p1,p2), t.slice(p3)));
+    if(essai.c < meilleur.c-0.5) meilleur = essai;
+  }
+  return {tour:meilleur.tour, cout:meilleur.c};
 }
 
 /* =====================================================================
@@ -717,16 +727,16 @@ async function calculer(depuisGPS, arretsSource, cible){
   try{
     // retour au dépôt seulement pour le dernier chargement calculé
     const retour = S.retour && !!S.depot && !S.charges.slice(cible+1).some(c=>c.plan);
-    const depotSep = retour && (dep.label==="Ma position" || dep.horsDepot);   // le dépôt est un point d'arrivée à part
-    const pts = depotSep ? [dep, ...arrets, {type:"depot", ...S.depot}] : [dep, ...arrets];
+    const pts = [dep, ...arrets];
     const {D, secours} = await matrice(pts,(a,b)=>statut(st,`Temps de trajet… ${a}/${b}`));
     statut(st,"Optimisation…");
     await new Promise(r=>setTimeout(r,20));
-    const fin = depotSep ? pts.length-1 : null;
-    const {tour} = pts.length>1 ? optimiser(D, 0, retour && !depotSep, 4000, fin) : {tour:[]};
+    // trajet ouvert : l'ordre ne tient pas compte du retour au dépôt,
+    // sinon les colis "sur le chemin du retour" partent en fin de tournée alors qu'on enchaîne le chargement suivant
+    const {tour} = pts.length>1 ? optimiser(D, 0, false, 4000, null) : {tour:[]};
     const ordre = tour.map(i=>pts[i]);
     statut(st,"Tracé…");
-    const arrivee = depotSep ? pts[fin] : dep;
+    const arrivee = S.depot ? {type:"depot", ...S.depot} : dep;
     const chemin = [dep, ...ordre, ...(retour?[arrivee]:[])];
     const {geom, legs} = await trace(chemin);
     const km = legs.reduce((a,l)=>a+l.m,0)/1000, min = legs.reduce((a,l)=>a+l.s,0)/60;
