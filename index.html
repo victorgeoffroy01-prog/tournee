@@ -187,7 +187,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.15</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.16</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -226,6 +226,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
     <h2>Adresses corrigées</h2>
     <p class="sub">Positions posées à la main sur la carte (Livrer, toucher un arrêt, « Corriger sur la carte »). Elles servent à chaque nouvelle saisie.</p>
     <ul class="list" id="l-corr"></ul>
+    <button class="btn" id="b-corr-csv" type="button">Exporter mes adresses placées (CSV)</button>
   </div>
 
   <div class="card stack">
@@ -1227,6 +1228,15 @@ $("placer-ok").onclick=()=>{
   statut($("st-rues"),"« "+saisiePlace+" » placée.");
 };
 
+$("b-corr-csv").onclick=()=>{
+  const lignes=[["saisie","nom_affiche","latitude","longitude","lien_carte"]];
+  for(const [k,v] of Object.entries(S.corrections))
+    lignes.push([k, v.label, v.lat.toFixed(6), v.lon.toFixed(6), `https://www.openstreetmap.org/?mlat=${v.lat.toFixed(6)}&mlon=${v.lon.toFixed(6)}#map=19/${v.lat.toFixed(6)}/${v.lon.toFixed(6)}`]);
+  const csv="\ufeff"+lignes.map(l=>l.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(";")).join("\n");
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  const a=document.createElement("a"); a.href=url; a.download="adresses-placees.csv"; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+};
 function rendreReglages(){
   rendreCorrections(); rendrePlacer();
   $("dep-cur").textContent = S.depot ? "Dépôt : "+S.depot.label : "Aucun dépôt renseigné.";
