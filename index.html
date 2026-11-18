@@ -187,7 +187,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.14</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.15</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -471,7 +471,10 @@ function colisIntrouvable(saisie){
 }
 async function ajouterColis(saisie){
   const c = await trouverAdresse(saisie);
-  S.colis.push(c); S.plan = null; sauver();
+  S.colis.push(c);
+  if(fige()){ const ar = insererArret(S.plan, c); c.rangAjout = ar ? ar.rang : null; }
+  else S.plan = null;
+  sauver();
   return c;
 }
 
@@ -502,7 +505,8 @@ async function envoyer(){
   statut(st,"Recherche…");
   try{
     const c = await ajouterColis(n+" "+r);
-    statut(st, c.introuvable ? "Pas trouvé : « "+c.saisie+" » est gardé tel quel et passera en dernier." : "✓ "+c.label, !!c.introuvable);
+    statut(st, (c.introuvable ? "Pas trouvé : « "+c.saisie+" » est gardé tel quel et passera en dernier." : "✓ "+c.label)
+      + (c.rangAjout ? " · Chargement figé : écris le n° "+c.rangAjout+" sur le colis." : (fige()?" · ajouté à l'arrêt existant.":"")), !!c.introuvable);
     fNum.value=""; fRue.value=""; $("sugg").innerHTML=""; fNum.focus();   // tout s'efface, prêt pour le suivant
     rendreColis();
   }catch(e){ statut(st,e.message,true); }
@@ -513,7 +517,9 @@ fNum.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); f
 /* +1 : duplique le dernier colis (même adresse) */
 $("b-plus").onclick = ()=>{
   const d = S.colis[S.colis.length-1]; if(!d) return;
-  S.colis.push({...d, id:uid()}); S.plan=null; sauver(); rendreColis();
+  S.colis.push({...d, id:uid()});
+  if(fige()){ const ar=S.plan.arrets.find(x=>!x.fait && (x.cle||norm(x.label))===d.cle); if(ar) ar.n++; else insererArret(S.plan,d); } else S.plan=null;
+  sauver(); rendreColis();
   statut($("st-add"),"✓ +1 au "+d.label);
 };
 
@@ -548,10 +554,41 @@ function rendreColis(){
                + (horsSecteur(c)? '<span class="tag bad">hors secteur, à supprimer</span>' : "");
     li.innerHTML = `<div class="main"><div>${esc(c.label)}</div><div class="sub">${tags}saisi : ${esc(c.saisie)}</div></div>`;
     const x = document.createElement("button"); x.className="x"; x.type="button"; x.textContent="✕"; x.setAttribute("aria-label","Supprimer");
-    x.onclick = ()=>{ S.colis = S.colis.filter(k=>k.id!==c.id); S.plan=null; sauver(); rendreColis(); };
+    x.onclick = ()=>{ S.colis = S.colis.filter(k=>k.id!==c.id);
+      if(fige()){ const ar=S.plan.arrets.find(x=>!x.fait && (x.cle||norm(x.label))===c.cle);
+        if(ar){ ar.n--; if(ar.n<=0) S.plan.arrets.splice(S.plan.arrets.indexOf(ar),1); } }
+      else S.plan=null;
+      sauver(); rendreColis(); };
     li.appendChild(x); ul.appendChild(li);
   });
 }
+
+/* Ajoute un colis à une tournée déjà calculée SANS la recalculer :
+   même adresse qu'un arrêt restant -> +1 colis sur cet arrêt ; sinon nouvel arrêt au meilleur endroit,
+   avec le numéro suivant. Introuvable -> en dernier. Renvoie le nouvel arrêt (ou null). */
+function insererArret(plan, a){
+  const reste = plan.arrets.filter(x=>!x.fait && x.type!=="retour");
+  const retourArr = plan.arrets.find(x=>x.type==="retour" && !x.fait);
+  const deja = reste.find(x=>(x.cle||norm(x.label))===a.cle);
+  if(deja){ deja.n++; return null; }
+  const fs = plan.arrets.filter(x=>x.fait && x.lat!=null);
+  const prev0 = fs.length ? fs[fs.length-1] : plan.depart;
+  let best = reste.length, bc = Infinity;
+  if(a.lat!=null) for(let k=0;k<=reste.length;k++){
+    const A = k===0 ? prev0 : reste[k-1], B = reste[k] || retourArr;
+    if(A.lat==null || (B && B.lat==null)) continue;
+    const cout = vol(A,a) + (B? vol(a,B)-vol(A,B) : 0);
+    if(cout<bc){ bc=cout; best=k; }
+  }
+  const maxRang = Math.max(0,...plan.arrets.map(x=>+x.rang||0));
+  const arret = {type:"colis", label:a.label, lat:a.lat, lon:a.lon, cle:a.cle, n:1, tournees:a.tournees, precis:a.precis, introuvable:!!a.introuvable, rang:maxRang+1, fait:false};
+  const pos = best<reste.length ? plan.arrets.indexOf(reste[best]) : (retourArr ? plan.arrets.indexOf(retourArr) : plan.arrets.length);
+  plan.arrets.splice(pos,0,arret);
+  return arret;
+}
+const fige = () => !!(S.charges[S.edit].fige && S.plan);   // chargement fini : ordre et numéros figés
+/* Le calcul du chargement affiché est à refaire (sauf s'il est figé) */
+function aRecalculer(){ if(!fige()) S.plan = null; }
 
 /* Chargements : onglets + fin de chargement */
 function rendreChargements(){
@@ -560,18 +597,23 @@ function rendreChargements(){
   const box = $("ch-liste"); box.innerHTML = "";
   if(nb>1) S.charges.forEach((c,k)=>{
     const b=document.createElement("button"); b.type="button"; b.className="chip"+(k===S.edit?" on":"");
-    b.innerHTML = "Ch. "+(k+1)+" <small>"+c.colis.length+" colis"+(c.plan?" · calculé":"")+"</small>";
+    b.innerHTML = "Ch. "+(k+1)+" <small>"+c.colis.length+" colis"+(c.fige&&c.plan?" · figé":c.plan?" · calculé":"")+"</small>";
     b.onclick = ()=>{ S.edit=k; sauver(); rendreColis(); statut($("st-opt"), ""); };
     box.appendChild(b);
   });
   const dernier = S.edit===nb-1, fin=$("b-finch"), aide=$("finch-aide");
   fin.hidden = !dernier;
   fin.disabled = !S.plan;
+  const fg = fige();
+  $("b-opt").disabled = fg;
+  $("b-opt").textContent = fg ? "Chargement fini · ordre figé" : "Calculer la tournée";
+  if(fg) statut($("st-opt"),"Les colis ajoutés ici prennent le numéro suivant, sans recalcul.");
   fin.textContent = "Fin du chargement "+n+" · commencer le "+(n+1);
   aide.textContent = !dernier ? "" : (S.plan ? "Le chargement "+(n+1)+" partira de la fin de celui-ci, avec ses propres numéros." : "Calcule la tournée et fais le tri avant de finir le chargement.");
 }
 $("b-finch").onclick = ()=>{
   if(!S.plan) return;
+  S.charges[S.edit].fige = true;   // ordre et numéros ne bougent plus (les colis sont rangés dans le camion)
   S.charges.push({colis:[], plan:null}); S.edit = S.charges.length-1;
   sauver(); rendreColis(); statut($("st-opt"),""); statut($("st-add"),"Chargement "+(S.edit+1)+" : saisis les colis du chariot suivant.");
   fNum.focus();
@@ -755,7 +797,7 @@ async function calculer(depuisGPS, arretsSource, cible){
   }catch(e){ statut(st,"Erreur : "+e.message,true); }
   finally{ btn.disabled=false; }
 }
-$("b-opt").onclick = async ()=>{ if(await calculer(false)) montrer("tri"); };
+$("b-opt").onclick = async ()=>{ if(fige()) return; if(await calculer(false)) montrer("tri"); };
 
 /* =====================================================================
    ONGLET TRI
@@ -1046,25 +1088,8 @@ function rendreLivrer(){
   if(c && $("b-add")){
     $("b-add").onclick = ()=>{ $("panel").dataset.mode="form"; formAdresse("Ajouter un colis", async a=>{
       S.lcolis.push(a);
-      const reste = S.lplan.arrets.filter(x=>!x.fait && x.type!=="retour");
-      const retourArr = S.lplan.arrets.find(x=>x.type==="retour" && !x.fait);
-      const deja = reste.find(x=>(x.cle||norm(x.label))===a.cle);
-      if(deja){ deja.n++; sauver(); return; }
-      // insertion au meilleur endroit parmi les arrêts restants (distance à vol d'oiseau) ; introuvable -> en dernier
-      const fs = S.lplan.arrets.filter(x=>x.fait && x.lat!=null);
-      const prev0 = fs.length ? fs[fs.length-1] : S.lplan.depart;
-      let best=0, bc=Infinity;
-      for(let k=0;k<=reste.length;k++){
-        const A = k===0 ? prev0 : reste[k-1], B = reste[k] || retourArr;
-        if(a.lat==null){ best=reste.length; break; }
-        if(A.lat==null || (B && B.lat==null)) continue;
-        const cout = vol(A,a) + (B? vol(a,B)-vol(A,B) : 0);
-        if(cout<bc){ bc=cout; best=k; }
-      }
-      const maxRang = Math.max(0,...S.lplan.arrets.map(x=>+x.rang||0));
-      const arret = {type:"colis", label:a.label, lat:a.lat, lon:a.lon, cle:a.cle, n:1, tournees:a.tournees, precis:a.precis, introuvable:!!a.introuvable, rang:maxRang+1, fait:false};
-      const pos = best<reste.length ? S.lplan.arrets.indexOf(reste[best]) : (retourArr ? S.lplan.arrets.indexOf(retourArr) : S.lplan.arrets.length);
-      S.lplan.arrets.splice(pos,0,arret);
+      const arret = insererArret(S.lplan, a);
+      if(!arret){ sauver(); return; }   // même adresse qu'un arrêt restant : colis ajouté à cet arrêt
       statut($("st-opt"),"");
       vert=null; sauver();
       setTimeout(()=>alerteNum(arret.rang),50);
@@ -1123,14 +1148,14 @@ function champAdresse(input, box, choisir){
     },300);
   });
 }
-champAdresse($("dep-q"),$("dep-sugg"),a=>{ S.depot={label:a.label,lat:a.lat,lon:a.lon}; S.plan=null; sauver(); rendreReglages(); });
+champAdresse($("dep-q"),$("dep-sugg"),a=>{ S.depot={label:a.label,lat:a.lat,lon:a.lon}; aRecalculer(); sauver(); rendreReglages(); });
 champAdresse($("fx-q"),$("fx-sugg"),a=>{
   const nom = $("fx-name").value.trim() || "Point fixe";
   S.fixes.push({id:uid(), nom, label:a.label, lat:a.lat, lon:a.lon, actif:true});
-  $("fx-name").value=""; S.plan=null; sauver(); rendreReglages();
+  $("fx-name").value=""; aRecalculer(); sauver(); rendreReglages();
 });
-$("dep-ret").onchange = e=>{ S.retour=e.target.checked; S.plan=null; sauver(); };
-$("dep-gps").onchange = e=>{ S.departGPS=e.target.checked; S.plan=null; sauver(); };
+$("dep-ret").onchange = e=>{ S.retour=e.target.checked; aRecalculer(); sauver(); };
+$("dep-gps").onchange = e=>{ S.departGPS=e.target.checked; aRecalculer(); sauver(); };
 $("b-save-rues").onclick = ()=>{
   document.querySelectorAll("[data-tournee]").forEach(ta=>{ S.rues[ta.dataset.tournee] = ta.value.split("\n").map(s=>s.trim()).filter(Boolean); });
   IDX = indexRues(); S.charges.flatMap(ch=>ch.colis).forEach(c=>{ c.tournees = tourneesDe(c.label.replace(/^\S+\s/,"").split(/\s\d{5}/)[0]); });
@@ -1211,9 +1236,9 @@ function rendreReglages(){
   S.fixes.forEach(f=>{
     const li=document.createElement("li");
     li.innerHTML=`<input type="checkbox" ${f.actif?"checked":""} aria-label="Actif"><div class="main"><div>${esc(f.nom)}</div><div class="sub">${esc(f.label)}</div></div>`;
-    li.querySelector("input").onchange=e=>{ f.actif=e.target.checked; S.plan=null; sauver(); };
+    li.querySelector("input").onchange=e=>{ f.actif=e.target.checked; aRecalculer(); sauver(); };
     const x=document.createElement("button"); x.className="x"; x.type="button"; x.textContent="✕";
-    x.onclick=()=>{ S.fixes=S.fixes.filter(k=>k.id!==f.id); S.plan=null; sauver(); rendreReglages(); };
+    x.onclick=()=>{ S.fixes=S.fixes.filter(k=>k.id!==f.id); aRecalculer(); sauver(); rendreReglages(); };
     li.appendChild(x); ul.appendChild(li);
   });
   const box = $("tournees-edit"); box.innerHTML="";
