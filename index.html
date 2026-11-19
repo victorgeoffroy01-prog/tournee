@@ -189,7 +189,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count" id="version">v1.20</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count" id="version">v1.21</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -355,6 +355,18 @@ if(!S.migr3){   // noms officiels : Rolland-Pilain, Bouseul (sinon l'adresse n'e
   for(const t in S.rues) S.rues[t] = S.rues[t].map(r=>fix[norm(r)]||r);
   S.migr3 = true;
 }
+/* Adresses placées à la main par Victor (export du 19/11) : intégrées à l'appli pour ne jamais les perdre */
+const CORRECTIONS_INIT = {
+  "42 samuel morse":   {label:"42 Rue Samuel Morse 37170 Chambray-lès-Tours",          lat:47.341885, lon:0.704225, tournees:["101"]},
+  "1 petite alouette": {label:"1 Rue de la Petite Alouette 37550 Saint-Avertin",       lat:47.352086, lon:0.715104, tournees:["107"]},
+  "25 mansart":        {label:"25 Résidence Mansart 37170 Chambray-lès-Tours",         lat:47.345948, lon:0.717813, tournees:["107"]},
+  "27 mansart":        {label:"27 Résidence Mansart 37170 Chambray-lès-Tours",         lat:47.345982, lon:0.717874, tournees:["107"]},
+  "83 pilain":         {label:"83 Rue Rolland-Pilain 37170 Chambray-lès-Tours",        lat:47.346188, lon:0.707463, tournees:["101"]},
+  "83 rolland pilain": {label:"83 Rue Rolland-Pilain 37170 Chambray-lès-Tours",        lat:47.346188, lon:0.707463, tournees:["101"]},
+  "7 richelieu":       {label:"7 Allée Richelieu 37550 Saint-Avertin",                  lat:47.357815, lon:0.725484, tournees:["107"]},
+  "64 republique":     {label:"64 Avenue de la République 37170 Chambray-lès-Tours",   lat:47.343816, lon:0.714700, tournees:["101","107"]}
+};
+if(!S.migr5){ S.corrections = S.corrections || {}; for(const k in CORRECTIONS_INIT) S.corrections[k] = {...CORRECTIONS_INIT[k]}; S.migr5 = true; }
 if(!S.migr4){ for(const t in S.rues) S.rues[t] = S.rues[t].map(r=>norm(r)==="frenes"?"Allée des Frênes":r); S.migr4 = true; }
 let IDX = indexRues();
 
@@ -1369,7 +1381,7 @@ document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>montrer(b.
 
 /* Mise à jour : l'appli installée sur l'écran d'accueil garde parfois l'ancienne version en mémoire.
    On regarde s'il y a plus récent en ligne et on propose de recharger. */
-const VERSION = "v1.20";
+const VERSION = "v1.21";
 async function verifierMiseAJour(){
   try{
     const r = await fetch(location.pathname+"?t="+Date.now(), {cache:"no-store"});
