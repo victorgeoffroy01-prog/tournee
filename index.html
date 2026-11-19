@@ -189,7 +189,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.19</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count" id="version">v1.20</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -1366,6 +1366,25 @@ function montrer(v){
   window.scrollTo(0,0);
 }
 document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>montrer(b.dataset.v));
+
+/* Mise à jour : l'appli installée sur l'écran d'accueil garde parfois l'ancienne version en mémoire.
+   On regarde s'il y a plus récent en ligne et on propose de recharger. */
+const VERSION = "v1.20";
+async function verifierMiseAJour(){
+  try{
+    const r = await fetch(location.pathname+"?t="+Date.now(), {cache:"no-store"});
+    const m = (await r.text()).match(/id="version">(v[\d.]+)</);
+    if(m && m[1]!==VERSION && !$("maj")){
+      const b=document.createElement("button"); b.id="maj"; b.type="button"; b.className="btn primary";
+      b.style.cssText="position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 8px);z-index:2000";
+      b.textContent="Nouvelle version "+m[1]+" disponible · Mettre à jour";
+      b.onclick=()=>location.replace(location.pathname+"?v="+Date.now());
+      document.body.appendChild(b);
+    }
+  }catch(e){}
+}
+verifierMiseAJour();
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") verifierMiseAJour(); });
 
 /* Garde l'écran allumé pendant la livraison si le téléphone le permet */
 async function ecranAllume(){ try{ if("wakeLock" in navigator) await navigator.wakeLock.request("screen"); }catch(e){} }
