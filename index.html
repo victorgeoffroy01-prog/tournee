@@ -187,7 +187,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.16</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.17</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -212,6 +212,8 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
   <div class="card stack" id="bloc-placer">
     <h2>Adresses à placer</h2>
     <p class="sub">Adresses que l'appli n'a pas trouvées (journée en cours et historique). Place-les une fois sur la carte : elles seront trouvées à chaque saisie.</p>
+    <div class="row"><input id="placer-libre" type="text" placeholder="Autre adresse ou rue entière (ex. 83 Rolland-Pilain, Richelieu)">
+      <button class="btn small primary" id="placer-libre-ok" type="button">Placer</button></div>
     <ul class="list" id="l-placer"></ul>
     <div class="stack" id="placer-zone" hidden>
       <strong id="placer-titre"></strong>
@@ -262,7 +264,7 @@ const BLOC     = 45;                                           // taille des blo
 /* Rues de départ, d'après les listes de tournées (modifiables dans Réglages) */
 const RUES_INIT = {
   "100": ["Rue de la Mairie","Place du 11 Novembre","Hippodrome","Grandes Maisons","Iris","Tamaris","Muguet","Primevères","Campanules","Jonquilles","Rue des Petits Clos","Pervenches","Cyclamens","Berchottière","Impasse des Clématites","Rue des Millepertuis","Allée des Millepertuis","Mesliers","Impasse des Mesliers","Jasmins","Grenouillère","Rainettes","Charmes","Marnière","Érables","Ornano","Prunus","Forêt","Bad Camberg","Turone","Joué","Nière","Fusains","Plaine","Avenir","Vignes","Petites Maisons","Abricotiers","Pêchers","Groseilliers","Cerisiers","Amandiers","Pommiers","Jean de la Fontaine"],
-  "101": ["Platanes","Rue des Tilleuls","Allée des Tilleuls","Hameau des Tilleuls","Brûlée","8 Mai","Roses","Violettes","Forêt","Buissons","Mésanges","Acacias","Frênes","Allée des Aulnes","Impasse des Aulnes","Bouleaux","Cytises","Suzanne Flon","Place Voru","Rue Rolland-Pilain","Marie Laurencin","Barbara","Petites Maisons","Samuel Morse","Rue Charles Bouseul","Avenue de la République","Boris Vian","Léonard de Vinci","Charpentier","Pinaigrier","Sicard"],
+  "101": ["Platanes","Rue des Tilleuls","Allée des Tilleuls","Hameau des Tilleuls","Brûlée","8 Mai","Roses","Violettes","Forêt","Buissons","Mésanges","Acacias","Allée des Frênes","Allée des Aulnes","Impasse des Aulnes","Bouleaux","Cytises","Suzanne Flon","Place Voru","Rue Rolland-Pilain","Marie Laurencin","Barbara","Petites Maisons","Samuel Morse","Rue Charles Bouseul","Avenue de la République","Boris Vian","Léonard de Vinci","Charpentier","Pinaigrier","Sicard"],
   "107": ["Avenue de la République","Rue de la Cour","Barillerie","Laloux","Mansart","Le Nôtre","Félix Dujardin","Petite Alouette","Avenue du Général de Gaulle","Fleuriau","Rabelais","Honoré de Balzac","Boylesve","Paul-Louis Courier","Anatole France","Ronsard","Impasse Ronsard","Alfred de Vigny","Rosnay","Jules Romains","Archerie","Malarderie","Fosse Primault","Richelieu","Rue de la Branchoire","Avenue de Beaugaillard","Rue du Chardonneret","Avenue de la Branchoire","Roitelets","Horizon Vert","Fauvettes","Rossignols","Bouvreuils"]
 };
 
@@ -351,6 +353,7 @@ if(!S.migr3){   // noms officiels : Rolland-Pilain, Bouseul (sinon l'adresse n'e
   for(const t in S.rues) S.rues[t] = S.rues[t].map(r=>fix[norm(r)]||r);
   S.migr3 = true;
 }
+if(!S.migr4){ for(const t in S.rues) S.rues[t] = S.rues[t].map(r=>norm(r)==="frenes"?"Allée des Frênes":r); S.migr4 = true; }
 let IDX = indexRues();
 
 /* Retrouve la ou les tournées d'une adresse géocodée */
@@ -423,10 +426,11 @@ const horsSecteur = c => !c.introuvable && !CODES_POSTAUX.some(cp => (c.label||"
 const aNumero = s => /^\d/.test((s||"").trim());
 /* Clé d'une saisie sans les mots de liaison : "25 rue Mansart" = "25 Mansart" */
 const MOTS_VIDES = new Set(["rue","r","avenue","av","allee","impasse","imp","place","pl","chemin","boulevard","bd","residence","res","de","des","du","la","le","l","d"]);
-const cleCorr = s => norm(s).split(" ").filter(w=>w && !MOTS_VIDES.has(w)).join(" ");
+const cleCorr = s => norm(s).replace(/\broland pilain\b/g,"rolland pilain").replace(/\bbourseul\b/g,"bouseul")
+  .split(" ").filter(w=>w && !MOTS_VIDES.has(w)).join(" ");
 /* Adresses que le service ne connaît pas sous leur nom : on cherche autre chose à la place */
 /* Rues qui existent dans les deux communes : celle du secteur (37170 Chambray, 37550 Saint-Avertin) */
-const COMMUNE_RUE = { "tamaris":"37170", "vignes":"37170" };
+const COMMUNE_RUE = { "tamaris":"37170", "vignes":"37170", "frenes":"37170" };
 function cpsDe(saisie){
   const mots = " "+cleCorr(saisie)+" ";
   for(const [rue,cp] of Object.entries(COMMUNE_RUE)) if(mots.includes(" "+rue+" ")) return [cp];
@@ -439,6 +443,10 @@ async function trouverAdresse(saisie){
   // 1) position corrigée à la main sur la carte
   const corr = S.corrections[cleCorr(saisie)];
   if(corr) return { id:uid(), saisie, label:corr.label, lat:corr.lat, lon:corr.lon, cle:norm(corr.label), score:1, precis:true, corrige:true, tournees:corr.tournees||[] };
+  // 1 bis) rue entière placée à la main (placement fait sans numéro)
+  const num = saisie.match(/^\S+/)[0], rueCorr = S.corrections[cleCorr(saisie.replace(/^\S+\s*/,""))];
+  if(rueCorr){ const lbl = num+" "+rueCorr.label;
+    return { id:uid(), saisie, label:lbl, lat:rueCorr.lat, lon:rueCorr.lon, cle:norm(lbl), score:1, precis:true, corrige:true, tournees:rueCorr.tournees||[] }; }
   // 2) alias connus
   const alias = ALIAS[cleCorr(saisie)];
   if(alias){
@@ -916,6 +924,18 @@ function annuler(){
   vert=null; sauver(); rendreLivrer();
 }
 
+/* ---------- Même chargement : si un arrêt prévu plus tard est tout près de celui qu'on vient de livrer,
+   on l'avance juste après (on est devant, autant le faire maintenant). Les numéros ne changent pas. ---------- */
+function rapprocher(c){
+  if(!c || c.lat==null) return [];
+  const plan=S.lplan, faits=plan.arrets.filter(a=>a.fait), reste=plan.arrets.filter(a=>!a.fait && a.type!=="retour"), retour=plan.arrets.filter(a=>a.type==="retour" && !a.fait);
+  const proches = reste.slice(1).filter(a=>a.lat!=null && vol(c,a)<=RAYON_PROCHE).sort((x,y)=>vol(c,x)-vol(c,y));   // le suivant est déjà le prochain
+  if(!proches.length) return [];
+  const autres = reste.filter(a=>!proches.includes(a));
+  plan.arrets = faits.concat(proches, autres, retour);
+  return proches;
+}
+
 /* ---------- Colis tout près dans les autres chargements (ou plus loin dans celui-ci) ---------- */
 const RAYON_PROCHE = 120;   // mètres à vol d'oiseau
 function prochesDe(c){
@@ -925,7 +945,7 @@ function prochesDe(c){
     ch.plan.arrets.forEach(a=>{
       if(a===c || a.fait || a.type==="retour" || a.lat==null) return;
       const d = vol(c,a);
-      if(d<=RAYON_PROCHE && (k!==kc || ch.plan.arrets.filter(x=>!x.fait).indexOf(a)>1)) out.push({a,k,d});   // dans ce chargement : seulement s'il n'est pas juste après
+      if(d<=RAYON_PROCHE && k!==kc) out.push({a,k,d});   // le même chargement est géré en avançant l'arrêt (voir rapprocher)
     });
   });
   return out.sort((x,y)=>x.d-y.d);
@@ -1058,11 +1078,13 @@ function rendreLivrer(){
     $("b-ok").onclick = ()=>{
       memo();
       const k=idxLivre(); c.fait=true; c.t=Date.now();
+      const avances = rapprocher(c);
       if(!S.charges[k].plan.arrets.some(a=>!a.fait)) S.livChoix=null;   // chargement fini : on repasse en automatique
       sauver();
       const suite = idxLivre()!==k;   // chargement terminé, on passe au suivant
       vert=null; rendreLivrer();
       if(suite) setTimeout(()=>infoPanel("Chargement "+(k+1)+" terminé. Place au chargement "+(idxLivre()+1)+"."),50);
+      else if(avances.length) setTimeout(()=>infoPanel("Tout près, avancé"+(avances.length>1?"s":"")+" maintenant : n° "+avances.map(a=>a.rang).join(", ")+"."),50);
     };
     $("b-skip").onclick = ()=>{   // repoussé en fin de tournée, juste avant le retour au dépôt
       memo(); const i=S.lplan.arrets.indexOf(c); S.lplan.arrets.splice(i,1);
@@ -1199,7 +1221,7 @@ function rendrePlacer(){
 let mapPlace, mkPlace, posPlace, saisiePlace;
 function ouvrirPlacement(saisie){
   saisiePlace = saisie; posPlace = null;
-  $("placer-zone").hidden = false; $("placer-titre").textContent = "Placer : "+saisie; $("placer-nom").value = ""; $("placer-ok").disabled = true;
+  $("placer-zone").hidden = false; $("placer-titre").textContent = "Placer : "+saisie+(aNumero(saisie)?"":" (toute la rue : tous les numéros iront à cet endroit)"); $("placer-nom").value = ""; $("placer-ok").disabled = true;
   if(!mapPlace){
     mapPlace = L.map("map-place").setView([CENTRE.lat,CENTRE.lon],15);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(mapPlace);
@@ -1209,20 +1231,27 @@ function ouvrirPlacement(saisie){
   }
   // on centre sur la rue si on la connaît
   setTimeout(()=>mapPlace.invalidateSize(),50);
-  geocode(saisie.replace(/^\S+\s*/,""),{limit:1}).then(r=>{ if(r.length) mapPlace.setView([r[0].lat,r[0].lon],17); }).catch(()=>{});
+  geocode(aNumero(saisie) ? saisie.replace(/^\S+\s*/,"") : saisie,{limit:1}).then(r=>{ if(r.length) mapPlace.setView([r[0].lat,r[0].lon],17); }).catch(()=>{});
   $("placer-zone").scrollIntoView({behavior:"smooth",block:"start"});
 }
 $("placer-no").onclick=()=>{ $("placer-zone").hidden=true; };
+$("placer-libre-ok").onclick=()=>{ const s=$("placer-libre").value.trim(); if(s){ $("placer-libre").value=""; ouvrirPlacement(s); } };
 $("placer-ok").onclick=()=>{
   if(!posPlace || !saisiePlace) return;
   const nom = $("placer-nom").value.trim();
   const label = nom || saisiePlace;
   const k = cleCorr(saisiePlace);
-  S.corrections[k] = {label, lat:posPlace.lat, lon:posPlace.lng, tournees: tourneesDe(saisiePlace.replace(/^\S+\s*/,""))};
-  // colis du jour qui ont cette saisie : on les place aussi
+  const rueEntiere = !aNumero(saisiePlace);
+  S.corrections[k] = {label, lat:posPlace.lat, lon:posPlace.lng, tournees: tourneesDe(rueEntiere ? saisiePlace : saisiePlace.replace(/^\S+\s*/,""))};
+  // colis du jour qui ont cette adresse (ou cette rue) : on les déplace aussi
+  const vise = c => rueEntiere ? cleCorr((c.saisie||"").replace(/^\S+\s*/,""))===k : cleCorr(c.saisie||"")===k;
   S.charges.forEach(ch=>{
-    ch.colis.forEach(c=>{ if(cleCorr(c.saisie)===k) Object.assign(c,{label, lat:posPlace.lat, lon:posPlace.lng, cle:norm(label), precis:true, introuvable:false}); });
-    if(ch.plan) ch.plan.arrets.forEach(a=>{ if(a.introuvable && cleCorr(a.label)===k) Object.assign(a,{label, lat:posPlace.lat, lon:posPlace.lng, cle:norm(label), introuvable:false}); });
+    const anciennes = new Map();
+    ch.colis.forEach(c=>{ if(!vise(c)) return; const old=c.cle;
+      const lbl = rueEntiere ? c.saisie.match(/^\S+/)[0]+" "+label : label;
+      Object.assign(c,{label:lbl, lat:posPlace.lat, lon:posPlace.lng, cle:norm(lbl), precis:true, introuvable:false}); anciennes.set(old,c); });
+    if(ch.plan) ch.plan.arrets.forEach(a=>{ const c = anciennes.get(a.cle||norm(a.label)); if(!c) return;
+      Object.assign(a,{label:c.label, lat:posPlace.lat, lon:posPlace.lng, cle:c.cle, introuvable:false}); });
   });
   sauver(); $("placer-zone").hidden=true; rendrePlacer(); rendreCorrections();
   statut($("st-rues"),"« "+saisiePlace+" » placée.");
