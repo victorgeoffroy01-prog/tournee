@@ -84,7 +84,9 @@ nav.tabs button.on{color:var(--accent);box-shadow:inset 0 3px 0 var(--accent)}
 .stopcard{background:var(--surface);border-bottom:1px solid var(--line);padding:10px max(14px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:8px}
 .gros{display:inline-block;font-family:var(--f-display);font-size:1.6rem;font-weight:700;line-height:1;padding:6px 12px;border-radius:8px;background:var(--tag)}
 .gros.plus{background:var(--warn);color:#fff}
-.proche{border:2px solid var(--warn);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px}
+.proche{border:2px solid var(--warn);border-radius:8px;padding:4px 8px}
+.proche summary{font-weight:600;padding:4px 0;cursor:pointer;color:var(--warn)}
+.proche ul{max-height:22vh;overflow:auto}
 .proche li{padding:6px 0}
 #map-place{height:300px;border-radius:8px}
 .stopcard .addr{font-family:var(--f-display);font-size:1.45rem;font-weight:700;line-height:1.15}
@@ -187,7 +189,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.17</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.18</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -937,7 +939,8 @@ function rapprocher(c){
 }
 
 /* ---------- Colis tout près dans les autres chargements (ou plus loin dans celui-ci) ---------- */
-const RAYON_PROCHE = 120;   // mètres à vol d'oiseau
+const RAYON_PROCHE = 120;
+let procheOuvert = false;   // encadré "tout près" replié par défaut pour garder la carte visible   // mètres à vol d'oiseau
 function prochesDe(c){
   if(!c || c.lat==null) return [];
   const out=[], kc=idxLivre();
@@ -1064,7 +1067,8 @@ function rendreLivrer(){
       <div class="row" style="flex-wrap:wrap">${c.type==="fixe"?'<span class="gros">Point fixe</span>':`<span class="gros${c.n>1?" plus":""}">${c.n} colis</span>`}
         <span class="sub" style="flex:1">${suiv?"ensuite : n° "+suiv.rang+", "+esc(suiv.label.replace(/\s\d{5}\s.*$/,""))+(suiv.n>1?" ("+suiv.n+" colis)":""):""}</span></div>
       ${(()=>{ const pr=prochesDe(c); if(!pr.length) return "";
-        return `<div class="proche"><strong>Tout près, à prendre maintenant :</strong><ul class="list">${pr.map((x,i)=>`<li><div class="main"><div>${S.charges.length>1?"Ch. "+(x.k+1)+" · ":""}n° ${x.a.rang} · ${esc(court(x.a.label))}</div><div class="sub">${x.a.n} colis · ${Math.round(x.d)} m</div></div><button class="btn small ok" type="button" data-pr="${i}">Livré aussi</button></li>`).join("")}</ul></div>`; })()}
+        const nb = pr.reduce((s,x)=>s+x.a.n,0);
+        return `<details class="proche" id="proche"${procheOuvert?" open":""}><summary>${nb} colis tout près (autre chariot)</summary><ul class="list">${pr.map((x,i)=>`<li><div class="main"><div>${S.charges.length>1?"Ch. "+(x.k+1)+" · ":""}n° ${x.a.rang} · ${esc(court(x.a.label))}</div><div class="sub">${x.a.n} colis · ${Math.round(x.d)} m</div></div><button class="btn small ok" type="button" data-pr="${i}">Livré aussi</button></li>`).join("")}</ul></details>`; })()}
       <div class="grid2"><button class="btn ok big" id="b-ok" type="button">Livré</button><button class="btn big" id="b-skip" type="button">Passer</button></div>
       <div class="row" style="flex-wrap:wrap">
         <button class="btn small" id="b-next" type="button">Prochains colis</button>
@@ -1092,6 +1096,7 @@ function rendreLivrer(){
       S.lplan.arrets.splice(r<0?S.lplan.arrets.length:r,0,c); sauver(); rendreLivrer(); };
     $("b-next").onclick = listeProchains;
     const pr = prochesDe(c);
+    if($("proche")) $("proche").ontoggle = e => { procheOuvert = e.target.open; setTimeout(()=>map.invalidateSize(),50); };
     card.querySelectorAll("[data-pr]").forEach(b=>b.onclick=()=>{ memo(); const x=pr[+b.dataset.pr]; x.a.fait=true; x.a.t=Date.now(); sauver(); rendreLivrer(); });
     if($("b-corr")) $("b-corr").onclick = ()=>commencerCorrection(c);
     $("b-inv").onclick = inverser;
