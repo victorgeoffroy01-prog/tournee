@@ -189,7 +189,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ ONGLET RÉGLAGES ============ -->
 <section id="view-reglages" class="wrap stack" hidden>
-  <header class="top"><h1>Réglages</h1><span class="count">v1.18</span></header>
+  <header class="top"><h1>Réglages</h1><span class="count">v1.19</span></header>
 
   <div class="card stack">
     <h2>Dépôt</h2>
@@ -473,7 +473,9 @@ function correspond(saisie, r){
   if(!numTape || numTape!==numTrouve) return false;
   const motsRue = cleCorr(saisie.replace(/^\S+\s*/,"")).split(" ").filter(w=>w.length>1 && !/^(bis|ter|quater)$/.test(w));
   const motsTrouves = cleCorr(r.rue||r.label).split(" ");
-  return motsRue.length>0 && motsRue.every(w => motsTrouves.some(t => t.startsWith(w)));
+  // mot entier obligatoire (au pluriel près) : "Cour" ne doit pas accepter "Courbet"
+  const egal = (w,t) => w===t || w+"s"===t || w===t+"s" || w+"x"===t || w===t+"x";
+  return motsRue.length>0 && motsRue.every(w => motsTrouves.some(t => egal(w,t)));
 }
 /* Colis gardé tel que tapé, sans position : il passera en dernier */
 function colisIntrouvable(saisie){
